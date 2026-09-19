@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookEndpoints, webhookRequests } from "@/db/schema";
 import { generateEndpointToken } from "@/lib/token";
+import { getSessionUser } from "@/lib/auth";
 import { desc, count, max, eq } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const endpoints = await db
       .select({
         id: webhookEndpoints.id,
@@ -17,6 +23,7 @@ export async function GET() {
         lastRequestAt: max(webhookRequests.receivedAt),
       })
       .from(webhookEndpoints)
+      .where(eq(webhookEndpoints.userId, session.userId))
       .leftJoin(webhookRequests, eq(webhookEndpoints.id, webhookRequests.endpointId))
       .groupBy(webhookEndpoints.id)
       .orderBy(desc(webhookEndpoints.createdAt));
@@ -33,6 +40,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json().catch(() => ({}));
     let name: string | null = null;
 
@@ -54,6 +66,7 @@ export async function POST(req: NextRequest) {
     const [newEndpoint] = await db
       .insert(webhookEndpoints)
       .values({
+        userId: session.userId,
         name: name || "Untitled Endpoint",
         token,
       })

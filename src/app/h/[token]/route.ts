@@ -3,9 +3,14 @@ import { db } from "@/db";
 import { webhookEndpoints, webhookRequests } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { publishNewRequest } from "@/lib/sse";
+import { checkRateLimit } from "@/lib/ratelimit";
 
 const MAX_PAYLOAD_SIZE = 1024 * 1024; // 1 MB limit
 const MAX_REQUESTS_PER_ENDPOINT = 100; // Retention limit
+const MAX_HEADER_COUNT = 100;
+const MAX_HEADER_VALUE_LENGTH = 8192; // 8KB per header
+const MAX_QUERY_COUNT = 50;
+const MAX_QUERY_VALUE_LENGTH = 2048; // 2KB per query param
 
 async function handleWebhookIngestion(
   req: NextRequest,
@@ -25,7 +30,23 @@ async function handleWebhookIngestion(
     );
   }
 
-  // 2. Content-Length Header check
+  const ipAddress =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "127.0.0.1";
+
+  // 2. Multi-instance Rate Limit Check
+  const rateLimitStatus = await checkRateLimit(token, ipAddress);
+  if (!rateLimitStatus.allowed) {
+    const res = NextResponse.json(
+      { error: "rate_limit_exceeded" },
+      { status: 429 }
+    );
+    res.headers.set("Retry-After", String(rateLimitStatus.retryAfter));
+    return res;
+  }
+
+  // 3. Content-Length Header check
   const contentLengthHeader = req.headers.get("content-length");
   if (contentLengthHeader) {
     const contentLength = parseInt(contentLengthHeader, 10);
@@ -37,7 +58,7 @@ async function handleWebhookIngestion(
     }
   }
 
-  // 3. Read Body & Measure Size
+  // 4. Read Body & Measure Size
   let rawBody = "";
   let bodySize = 0;
   let parsedBody: unknown = null;
@@ -61,7 +82,7 @@ async function handleWebhookIngestion(
     console.error("Error reading request body:", err);
   }
 
-  // 4. Parse Body (JSON, form-urlencoded, or text)
+  // 5. Parse Body (JSON, form-urlencoded, or text)
   const contentType = req.headers.get("content-type") || "";
 
   if (rawBody) {
@@ -77,7 +98,9 @@ async function handleWebhookIngestion(
         const searchParams = new URLSearchParams(rawBody);
         const formObj: Record<string, string> = {};
         searchParams.forEach((value, key) => {
-          formObj[key] = value;
+          if (Object.keys(formObj).length < 50) {
+            formObj[key.slice(0, 256)] = value.slice(0, 4096);
+          }
         });
         parsedBody = formObj;
       } catch {
@@ -86,35 +109,40 @@ async function handleWebhookIngestion(
     }
   }
 
-  // 5. Capture Headers & Query Parameters
+  // 6. Capture Headers with limits
   const headersObj: Record<string, string> = {};
+  let headerCount = 0;
   req.headers.forEach((value, key) => {
-    headersObj[key.toLowerCase()] = value;
+    if (headerCount < MAX_HEADER_COUNT) {
+      headersObj[key.toLowerCase()] = value.slice(0, MAX_HEADER_VALUE_LENGTH);
+      headerCount++;
+    }
   });
 
+  // 7. Capture Query Parameters with limits
   const queryObj: Record<string, string> = {};
+  let queryCount = 0;
   req.nextUrl.searchParams.forEach((value, key) => {
-    queryObj[key] = value;
+    if (queryCount < MAX_QUERY_COUNT) {
+      queryObj[key.slice(0, 256)] = value.slice(0, MAX_QUERY_VALUE_LENGTH);
+      queryCount++;
+    }
   });
 
-  const ipAddress =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "127.0.0.1";
-  const userAgent = req.headers.get("user-agent") || undefined;
+  const userAgent = req.headers.get("user-agent")?.slice(0, 512) || undefined;
 
-  // 6. Save Request to PostgreSQL
+  // 8. Save Request to PostgreSQL
   const [newRequest] = await db
     .insert(webhookRequests)
     .values({
       endpointId: endpoint.id,
       method: req.method.toUpperCase(),
-      path: req.nextUrl.pathname + req.nextUrl.search,
+      path: (req.nextUrl.pathname + req.nextUrl.search).slice(0, 2048),
       query: Object.keys(queryObj).length > 0 ? queryObj : null,
       headers: headersObj,
       body: parsedBody,
       rawBody: rawBody || null,
-      contentType: contentType || null,
+      contentType: contentType ? contentType.slice(0, 256) : null,
       bodySize,
       ipAddress,
       userAgent,
@@ -122,7 +150,7 @@ async function handleWebhookIngestion(
     })
     .returning();
 
-  // 7. Enforce Server-Side Retention Policy (Keep latest 100 requests per endpoint)
+  // 9. Enforce Server-Side Retention Policy (Keep latest 100 requests per endpoint)
   try {
     const subquery = db
       .select({ id: webhookRequests.id })
@@ -138,10 +166,10 @@ async function handleWebhookIngestion(
     console.error("Error running request retention cleanup:", err);
   }
 
-  // 8. Publish Realtime SSE Event
+  // 10. Publish Realtime SSE Event
   publishNewRequest(endpoint.id, newRequest);
 
-  // 9. Return 200 OK Response
+  // 11. Return 200 OK Response
   return NextResponse.json(
     { received: true },
     { status: 200 }

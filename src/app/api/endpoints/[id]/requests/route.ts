@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookRequests } from "@/db/schema";
+import { getSessionUser, verifyEndpointOwnership } from "@/lib/auth";
 import { eq, desc, and, ilike, or, sql, count } from "drizzle-orm";
 
 export async function GET(
@@ -8,7 +9,17 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id: endpointId } = await params;
+    const isOwner = await verifyEndpointOwnership(endpointId, session.userId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Endpoint not found" }, { status: 404 });
+    }
+
     const searchParams = req.nextUrl.searchParams;
     const query = searchParams.get("q")?.trim() || "";
     const methodFilter = searchParams.get("method")?.trim().toUpperCase() || "";
@@ -75,11 +86,20 @@ export async function GET(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id: endpointId } = await params;
+    const isOwner = await verifyEndpointOwnership(endpointId, session.userId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Endpoint not found" }, { status: 404 });
+    }
 
     // Strictly scoped bulk deletion for the target endpoint only
     await db

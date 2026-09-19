@@ -1,27 +1,43 @@
-# WebhookLab (Phase 1)
+# WebhookLab
 
 > Webhook debugging without the guesswork.
 
-WebhookLab is a developer-focused webhook debugging platform. In Phase 1, WebhookLab enables developers to create, manage, copy, and delete secure public HTTP webhook endpoints.
+WebhookLab is a production-quality developer-focused webhook debugging platform. It gives developers temporary public HTTP endpoints, captures incoming requests in real time, stores them safely in PostgreSQL, streams them live to an interactive dashboard, and enables deep payload inspection.
 
 ---
 
-## 🛠 Tech Stack (Phase 1)
+## 🛠 Tech Stack
 
 - **Framework**: Next.js 16 (App Router, Turbopack)
 - **Language**: TypeScript
 - **Database & ORM**: PostgreSQL + Drizzle ORM
-- **Styling**: Tailwind CSS v4, shadcn/ui, Lucide Icons, next-themes (Dark & Light Mode)
-- **Runtime**: Bun, `bun test`
+- **Authentication**: JWT Cookie Sessions (`jose`) + Web Crypto PBKDF2 Password Hashing
+- **Realtime**: HTTP Server-Sent Events (SSE) + Event Bus
+- **UI Components**: Tailwind CSS v4, shadcn/ui, Lucide Icons, Varnus (`JsonInspector`, `RequestResponseViewer`), `next-themes`
+- **Runtime & Testing**: Bun, `bun test`
 
 ---
 
-## ✨ Features (Phase 1)
+## ✨ Features (Phase 1 – Phase 6)
 
-- **Create Webhook Endpoints**: Generates cryptographically secure 96-bit random tokens (`/h/<24-hex-token>`).
-- **Endpoint Dashboard (`/dashboard`)**: List endpoints, copy public webhook URLs, view creation timestamps, and delete endpoints with confirmation.
-- **Endpoint Detail View (`/dashboard/endpoints/[id]`)**: Displays endpoint metadata and onboarding `curl` instructions.
-- **Public Route Placeholder (`/h/[token]`)**: Validates token existence; returns 404 for unknown/deleted endpoints, and an active status message for valid endpoints.
+- **Authenticated Dashboard & User Ownership**: Create an account, sign in securely, and manage endpoints scoped exclusively to your user identity.
+- **Public Ingestion Endpoint (`/h/[token]`)**: High-entropy 96-bit hexadecimal public token URLs (`http://localhost:3000/h/<24-hex-token>`) supporting GET, POST, PUT, PATCH, DELETE webhooks without logging in.
+- **Realtime SSE Request Streaming**: Instant live update badge (`● Live`) streaming newly arrived webhooks directly to your open browser tab without manual refresh.
+- **Payload Capture & Safe Storage**: Stores HTTP method, full request path, query parameters, request headers, parsed JSON/form bodies, raw text, body size, IP address, and timestamps.
+- **Varnus-Powered Inspection Experience**: 2-column debugging view with expandable JSON node trees, raw text previews, and sensitive credential redaction (`authorization`, `cookie`, `x-api-key`, etc.).
+- **Instant Search & Method Filtering**: ~300ms debounced search over path, query params, and body content; method chips (`ALL`, `GET`, `POST`, `PUT`, `PATCH`, `DELETE`); `/` keyboard shortcut.
+- **Request Management & Bounded Retention**: Pagination (25 requests/page), single request deletion, bulk `Clear History`, and automated 100-request retention pruning per endpoint.
+- **Multi-Instance Rate Limiting**: PostgreSQL-backed rate limiting (`60 req/min per endpoint`, `120 req/min per IP`), returning HTTP `429 Too Many Requests` when limits are exceeded.
+- **Payload & Abuse Protections**: Strict 1MB payload ceiling (`413 Payload Too Large`), max 100 headers count, and max 8KB per header value.
+
+---
+
+## 🔒 Security
+
+For detailed security guidelines, token entropy analysis, cross-user isolation models, and abuse controls, see [docs/security.md](docs/security.md).
+
+> [!NOTE]
+> Outbound Request Replay is intentionally disabled in Phase 6 to focus strictly on public MVP hardening and cross-user isolation. Replay introduces Server-Side Request Forgery (SSRF) risks and will be handled in a dedicated security phase.
 
 ---
 
@@ -40,21 +56,16 @@ bun install
 
 ### 3. Environment Setup
 Create a `.env.local` file:
-```bash
-cp .env.example .env.local
-```
-
-Ensure `.env.local` contains:
 ```env
 DATABASE_URL="postgres://127.0.0.1:5432/webhooklab"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+AUTH_SECRET="webhooklab_super_secret_development_jwt_key_32_bytes_min!"
 ```
 
 ### 4. Database Setup & Migration
-Create the database and push the Drizzle schema:
+Apply schema migrations:
 ```bash
-psql -h 127.0.0.1 -d postgres -c "CREATE DATABASE webhooklab;"
-bunx drizzle-kit push
+bun src/db/migrate.ts
 ```
 
 ### 5. Run Development Server
@@ -65,24 +76,15 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🧪 Phase 1 Validation & Testing
+## 🧪 Testing & Verification
 
-Run the automated Phase 1 test suite:
+Run automated test suite covering Auth, Ownership, Cross-User Access Denial, Rate Limiting, Payload Limits, and Header Redaction:
 ```bash
 bun test
 ```
 
-Run linter & build checks:
+Run code quality and production build checks:
 ```bash
 bun run lint
 bun run build
 ```
-
----
-
-## 🔮 Upcoming in Phase 2
-
-- Webhook request ingestion engine (`/h/[token]` full payload capture)
-- PostgreSQL request persistence
-- Server-Sent Events (SSE) live updates
-- Request inspector & payload viewer

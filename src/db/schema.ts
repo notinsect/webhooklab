@@ -10,10 +10,25 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 255 }).notNull().unique(),
+    name: varchar("name", { length: 255 }),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("users_email_idx").on(table.email)]
+);
+
 export const webhookEndpoints = pgTable(
   "webhook_endpoints",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 255 }).default("Untitled Endpoint").notNull(),
     token: varchar("token", { length: 64 }).notNull().unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -21,6 +36,7 @@ export const webhookEndpoints = pgTable(
   },
   (table) => [
     index("webhook_endpoints_token_idx").on(table.token),
+    index("webhook_endpoints_user_id_idx").on(table.userId),
   ]
 );
 
@@ -50,7 +66,25 @@ export const webhookRequests = pgTable(
   ]
 );
 
-export const webhookEndpointsRelations = relations(webhookEndpoints, ({ many }) => ({
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: varchar("key", { length: 255 }).primaryKey(),
+    count: integer("count").notNull().default(0),
+    resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("rate_limits_reset_at_idx").on(table.resetAt)]
+);
+
+export const usersRelations = relations(users, ({ many }) => ({
+  endpoints: many(webhookEndpoints),
+}));
+
+export const webhookEndpointsRelations = relations(webhookEndpoints, ({ one, many }) => ({
+  user: one(users, {
+    fields: [webhookEndpoints.userId],
+    references: [users.id],
+  }),
   requests: many(webhookRequests),
 }));
 
@@ -61,8 +95,13 @@ export const webhookRequestsRelations = relations(webhookRequests, ({ one }) => 
   }),
 }));
 
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;
 export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert;
 
 export type WebhookRequest = typeof webhookRequests.$inferSelect;
 export type NewWebhookRequest = typeof webhookRequests.$inferInsert;
+
+export type RateLimit = typeof rateLimits.$inferSelect;

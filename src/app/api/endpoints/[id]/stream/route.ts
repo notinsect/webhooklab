@@ -1,12 +1,23 @@
 import { NextRequest } from "next/server";
 import { sseBus } from "@/lib/sse";
 import { WebhookRequest } from "@/db/schema";
+import { getSessionUser, verifyEndpointOwnership } from "@/lib/auth";
+import { redactHeaders } from "@/lib/redaction";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getSessionUser(req);
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   const { id: endpointId } = await params;
+  const isOwner = await verifyEndpointOwnership(endpointId, session.userId);
+  if (!isOwner) {
+    return new Response("Endpoint not found", { status: 404 });
+  }
 
   const stream = new ReadableStream({
     start(controller) {
@@ -17,7 +28,11 @@ export async function GET(
 
       const listener = (eventPayload: { type: string; data: WebhookRequest }) => {
         try {
-          const chunk = `event: ${eventPayload.type}\ndata: ${JSON.stringify(eventPayload.data)}\n\n`;
+          const safeData = {
+            ...eventPayload.data,
+            headers: redactHeaders((eventPayload.data.headers as Record<string, string>) || {}),
+          };
+          const chunk = `event: ${eventPayload.type}\ndata: ${JSON.stringify(safeData)}\n\n`;
           controller.enqueue(encoder.encode(chunk));
         } catch (err) {
           console.error("SSE enqueue error:", err);

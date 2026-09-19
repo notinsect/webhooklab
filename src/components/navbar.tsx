@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Terminal, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Terminal, Plus, LogOut, User as UserIcon } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 
 function GithubIcon({ className }: { className?: string }) {
@@ -23,6 +25,31 @@ function GithubIcon({ className }: { className?: string }) {
 }
 
 export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
+  const router = useRouter();
+  const [user, setUser] = useState<{ email: string; name?: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.authenticated && data?.user) {
+          setUser(data.user);
+        } else {
+          setUser(null);
+        }
+      })
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+    router.push("/login");
+    router.refresh();
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-14 items-center justify-between px-4">
@@ -55,11 +82,45 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
             <button
               type="button"
               onClick={onCreateClick}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90 cursor-pointer"
             >
               <Plus className="size-3.5" />
               <span>New Endpoint</span>
             </button>
+          )}
+
+          {!loading && user && (
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-2.5 py-1 rounded-md border">
+                <UserIcon className="size-3" />
+                <span className="truncate max-w-[120px] font-mono">{user.email}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Sign out"
+                className="inline-flex size-8 items-center justify-center rounded-md border bg-background text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </div>
+          )}
+
+          {!loading && !user && (
+            <div className="flex items-center gap-2">
+              <Link
+                href="/login"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 transition-colors"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/signup"
+                className="text-xs font-medium bg-foreground text-background px-3 py-1.5 rounded-md hover:opacity-90 transition-opacity"
+              >
+                Get Started
+              </Link>
+            </div>
           )}
 
           <a

@@ -46,7 +46,7 @@ export default function LandingPage() {
               href="/dashboard"
               className="inline-flex h-11 items-center gap-2 rounded-lg bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
             >
-              <span>Create Webhook Endpoint</span>
+              <span>Open Dashboard</span>
               <ArrowRight className="size-4" />
             </Link>
 
@@ -72,7 +72,7 @@ export default function LandingPage() {
               </div>
               <h3 className="font-semibold text-foreground">1. Create Endpoint</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Instantly generate a high-entropy public token URL shape without authentication hurdles.
+                Instantly generate a high-entropy public token URL shape from your authenticated workspace.
               </p>
               <div className="font-mono text-[11px] rounded bg-muted/60 p-2 text-foreground truncate border">
                 https://app.com/h/8fx21a9c4b7e
@@ -125,10 +125,10 @@ export default function LandingPage() {
             <div className="space-y-2">
               <div className="flex items-center gap-2 font-semibold text-foreground">
                 <Shield className="size-4 text-blue-500" />
-                <span>SSRF Protection & Replay</span>
+                <span>Authenticated & Multi-Tenant Isolated</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Safely replay captured webhooks to external destination URLs with strict private IP and metadata subnet filtering.
+                Enterprise-grade user ownership, multi-instance rate limiting, strict header redaction, and bounded retention.
               </p>
             </div>
           </div>

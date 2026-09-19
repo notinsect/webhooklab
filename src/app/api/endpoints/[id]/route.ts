@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookEndpoints } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getSessionUser } from "@/lib/auth";
+import { eq, and } from "drizzle-orm";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
     const endpoint = await db.query.webhookEndpoints.findFirst({
-      where: eq(webhookEndpoints.id, id),
+      where: and(eq(webhookEndpoints.id, id), eq(webhookEndpoints.userId, session.userId)),
     });
 
     if (!endpoint) {
@@ -31,14 +37,19 @@ export async function GET(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getSessionUser(req);
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
     const [deleted] = await db
       .delete(webhookEndpoints)
-      .where(eq(webhookEndpoints.id, id))
+      .where(and(eq(webhookEndpoints.id, id), eq(webhookEndpoints.userId, session.userId)))
       .returning();
 
     if (!deleted) {
