@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
-import { Terminal, Zap, Shield, ArrowRight } from "lucide-react";
+import { Terminal, Zap, Shield, ArrowRight, Code } from "lucide-react";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -38,15 +38,15 @@ export default function LandingPage() {
           </h1>
 
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            Create a temporary HTTP endpoint, copy the URL into Stripe, GitHub, or curl, and inspect captured payloads in real time with high precision.
+            Create an endpoint, send it a request, and inspect the payload in real time.
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
             <Link
-              href="/dashboard"
+              href="/signup"
               className="inline-flex h-11 items-center gap-2 rounded-lg bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
             >
-              <span>Open Dashboard</span>
+              <span>Get Started</span>
               <ArrowRight className="size-4" />
             </Link>
 
@@ -57,8 +57,33 @@ export default function LandingPage() {
               className="inline-flex h-11 items-center gap-2 rounded-lg border bg-background px-6 text-sm font-medium text-foreground hover:bg-muted transition-colors"
             >
               <GithubIcon className="size-4" />
-              <span>View GitHub</span>
+              <span>GitHub</span>
             </a>
+          </div>
+
+          <p className="text-xs text-muted-foreground pt-2">
+            Built with <span className="font-semibold text-foreground">Varnus</span> components for structured request inspection.
+          </p>
+        </section>
+
+        {/* Realistic Curl Showcase */}
+        <section className="container mx-auto px-4 py-6 max-w-3xl">
+          <div className="rounded-xl border bg-neutral-900 text-neutral-100 p-4 font-mono text-xs shadow-xl space-y-2">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-2 text-neutral-400">
+              <div className="flex items-center gap-2">
+                <Code className="size-3.5 text-emerald-400" />
+                <span>Send your first webhook</span>
+              </div>
+              <span className="text-[10px] text-neutral-500">cURL Example</span>
+            </div>
+            <pre className="overflow-x-auto text-emerald-400 py-1">
+{`curl -X POST "https://webhooklab.dev/h/8fx21a9c4b7e" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "event": "payment.completed",
+    "id": "evt_123"
+  }'`}
+            </pre>
           </div>
         </section>
 
@@ -72,10 +97,10 @@ export default function LandingPage() {
               </div>
               <h3 className="font-semibold text-foreground">1. Create Endpoint</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Instantly generate a high-entropy public token URL shape from your authenticated workspace.
+                Instantly generate a high-entropy public token URL shape from your workspace.
               </p>
               <div className="font-mono text-[11px] rounded bg-muted/60 p-2 text-foreground truncate border">
-                https://app.com/h/8fx21a9c4b7e
+                https://webhooklab.dev/h/8fx21a9c4b7e
               </div>
             </div>
 
@@ -86,7 +111,7 @@ export default function LandingPage() {
               </div>
               <h3 className="font-semibold text-foreground">2. Send Webhook</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Paste the generated endpoint URL into Stripe, GitHub, Postman, or send a quick curl.
+                Paste the URL into Stripe, GitHub, Postman, or send an HTTP request.
               </p>
               <div className="font-mono text-[11px] rounded bg-muted/60 p-2 text-emerald-600 dark:text-emerald-400 truncate border">
                 curl -X POST /h/8fx21a9c4b7e
@@ -100,7 +125,7 @@ export default function LandingPage() {
               </div>
               <h3 className="font-semibold text-foreground">3. Inspect Payload</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Watch captured HTTP requests stream live in your browser with interactive JSON body inspection.
+                Watch HTTP requests stream live in your browser with interactive JSON body inspection.
               </p>
               <div className="font-mono text-[11px] rounded bg-muted/60 p-2 text-blue-600 dark:text-blue-400 truncate border">
                 POST 200 OK • 24ms
@@ -118,17 +143,17 @@ export default function LandingPage() {
                 <span>Developer-First Interface</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Clean, dense UI inspired by Linear & Vercel. Monospace values, automatic header redaction, and instant copy buttons.
+                Clean, dense UI inspired by Linear & Vercel. Monospace values, automatic credential redaction, and instant copy actions.
               </p>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 font-semibold text-foreground">
                 <Shield className="size-4 text-blue-500" />
-                <span>Authenticated & Multi-Tenant Isolated</span>
+                <span>Authenticated & Replay-Protected</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Enterprise-grade user ownership, multi-instance rate limiting, strict header redaction, and bounded retention.
+                Enterprise user isolation, rate limiting, SSRF safeguards, sensitive header exclusion, and controlled webhook replay.
               </p>
             </div>
           </div>
