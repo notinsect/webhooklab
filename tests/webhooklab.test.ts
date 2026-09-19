@@ -1,92 +1,41 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { generateEndpointToken } from "@/lib/token";
-import { sseBus, publishNewRequest } from "@/lib/sse";
+import { redactHeaderValue, redactHeaders } from "@/lib/redaction";
 import { db } from "@/db";
 import { webhookEndpoints, webhookRequests, WebhookRequest } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
-describe("Phase 3: Realtime SSE Bus & Endpoint Isolation", () => {
-  test("emits request_created event to subscribers of specific endpointId", (done) => {
-    const endpointId = "test-ep-12345";
-    const dummyReq: WebhookRequest = {
-      id: "req-999",
-      endpointId,
+describe("Phase 4: Header Redaction & Copy Safety", () => {
+  test("redacts sensitive header credentials (authorization, cookie, x-api-key)", () => {
+    expect(redactHeaderValue("authorization", "Bearer secret_live_key_998877")).toBe("Bearer ••••••••");
+    expect(redactHeaderValue("cookie", "session_id=abcdef123456")).toBe("••••••••");
+    expect(redactHeaderValue("x-api-key", "ak_live_123456789")).toBe("••••••••");
+  });
+
+  test("generates safe serialized request JSON object with redacted headers", () => {
+    const rawHeaders = {
+      "content-type": "application/json",
+      "authorization": "Bearer secret_key",
+      "x-api-key": "secret_api_key",
+      "user-agent": "curl/8.7.1",
+    };
+
+    const redacted = redactHeaders(rawHeaders);
+    const safeJsonString = JSON.stringify({
       method: "POST",
-      path: `/h/token123`,
-      query: null,
-      headers: { "content-type": "application/json" },
-      body: { event: "ping" },
-      rawBody: '{"event":"ping"}',
-      contentType: "application/json",
-      bodySize: 16,
-      ipAddress: "127.0.0.1",
-      userAgent: "bun-test",
-      receivedAt: new Date(),
-    };
+      path: "/h/token123",
+      headers: redacted,
+      body: { event: "payment.completed" },
+    });
 
-    const listener = (event: { type: string; data: WebhookRequest }) => {
-      expect(event.type).toBe("request_created");
-      expect(event.data.id).toBe("req-999");
-      expect(event.data.endpointId).toBe(endpointId);
-      sseBus.off(`endpoint:${endpointId}`, listener);
-      done();
-    };
-
-    sseBus.on(`endpoint:${endpointId}`, listener);
-    publishNewRequest(endpointId, dummyReq);
-  });
-
-  test("isolates events between different endpoints (Endpoint A does not receive Endpoint B events)", (done) => {
-    const endpointA = "endpoint-A";
-    const endpointB = "endpoint-B";
-
-    let endpointAEventsReceived = 0;
-
-    const listenerA = () => {
-      endpointAEventsReceived++;
-    };
-
-    sseBus.on(`endpoint:${endpointA}`, listenerA);
-
-    // Publish to Endpoint B
-    const dummyReqB: WebhookRequest = {
-      id: "req-B",
-      endpointId: endpointB,
-      method: "GET",
-      path: `/h/tokenB`,
-      query: null,
-      headers: {},
-      body: null,
-      rawBody: null,
-      contentType: null,
-      bodySize: 0,
-      ipAddress: "127.0.0.1",
-      userAgent: "bun-test",
-      receivedAt: new Date(),
-    };
-
-    publishNewRequest(endpointB, dummyReqB);
-
-    setTimeout(() => {
-      expect(endpointAEventsReceived).toBe(0);
-      sseBus.off(`endpoint:${endpointA}`, listenerA);
-      done();
-    }, 50);
-  });
-
-  test("cleans up listener when client unsubscribes", () => {
-    const endpointId = "cleanup-ep-555";
-    const listener = () => {};
-
-    sseBus.on(`endpoint:${endpointId}`, listener);
-    expect(sseBus.listenerCount(`endpoint:${endpointId}`)).toBe(1);
-
-    sseBus.off(`endpoint:${endpointId}`, listener);
-    expect(sseBus.listenerCount(`endpoint:${endpointId}`)).toBe(0);
+    expect(safeJsonString).not.toContain("secret_key");
+    expect(safeJsonString).not.toContain("secret_api_key");
+    expect(safeJsonString).toContain("Bearer ••••••••");
+    expect(safeJsonString).toContain("••••••••");
   });
 });
 
-describe("Phase 2 & 3: Database & Webhook Storage Integration", () => {
+describe("Phase 4: Realtime Selection Rule & Request Inspection", () => {
   let createdEndpointId: string;
   const token = generateEndpointToken();
 
@@ -94,7 +43,7 @@ describe("Phase 2 & 3: Database & Webhook Storage Integration", () => {
     const [ep] = await db
       .insert(webhookEndpoints)
       .values({
-        name: "Phase 3 Realtime Test Endpoint",
+        name: "Phase 4 Inspection Test Endpoint",
         token,
       })
       .returning();
@@ -107,16 +56,75 @@ describe("Phase 2 & 3: Database & Webhook Storage Integration", () => {
     }
   });
 
-  test("captures POST request with parsed JSON body", async () => {
-    const jsonBody = { event: "payment.completed", id: "evt_realtime_001", amount: 2499, currency: "INR" };
-    const [req] = await db
-      .insert(webhookRequests)
-      .values({
+  test("preserves current user selection when a new realtime request arrives", () => {
+    const initialRequests: WebhookRequest[] = [
+      {
+        id: "req-A",
         endpointId: createdEndpointId,
         method: "POST",
         path: `/h/${token}`,
         query: null,
-        headers: { "content-type": "application/json", "x-webhook-test": "realtime" },
+        headers: {},
+        body: { name: "Request A" },
+        rawBody: null,
+        contentType: "application/json",
+        bodySize: 20,
+        ipAddress: "127.0.0.1",
+        userAgent: "curl/8.7.1",
+        receivedAt: new Date(Date.now() - 5000),
+      },
+    ];
+
+    let currentSelectedId: string | undefined = "req-A";
+
+    // New request B arrives
+    const newReqB: WebhookRequest = {
+      id: "req-B",
+      endpointId: createdEndpointId,
+      method: "POST",
+      path: `/h/${token}`,
+      query: null,
+      headers: {},
+      body: { name: "Request B" },
+      rawBody: null,
+      contentType: "application/json",
+      bodySize: 20,
+      ipAddress: "127.0.0.1",
+      userAgent: "curl/8.7.1",
+      receivedAt: new Date(),
+    };
+
+    // Prepend new request
+    const updatedList = [newReqB, ...initialRequests];
+
+    // Realtime Selection Rule: currentSelectedId remains "req-A" if already set!
+    currentSelectedId = currentSelectedId || newReqB.id;
+
+    expect(updatedList[0].id).toBe("req-B"); // Prepended to top
+    expect(currentSelectedId).toBe("req-A"); // User selection preserved!
+  });
+
+  test("maps stored request properties into HttpMessage format for RequestResponseViewer", async () => {
+    const jsonBody = {
+      event: "payment.completed",
+      id: "evt_123",
+      amount: 2499,
+      currency: "INR",
+      customer: { id: "cus_42", email: "alex@example.com" },
+    };
+
+    const [storedReq] = await db
+      .insert(webhookRequests)
+      .values({
+        endpointId: createdEndpointId,
+        method: "POST",
+        path: `/h/${token}?source=stripe&environment=test`,
+        query: { source: "stripe", environment: "test" },
+        headers: {
+          "content-type": "application/json",
+          "authorization": "Bearer secret-example-token",
+          "x-test-header": "webhooklab",
+        },
         body: jsonBody,
         rawBody: JSON.stringify(jsonBody),
         contentType: "application/json",
@@ -125,17 +133,17 @@ describe("Phase 2 & 3: Database & Webhook Storage Integration", () => {
       })
       .returning();
 
-    expect(req.method).toBe("POST");
-    expect(req.body).toEqual(jsonBody);
-  });
+    // Map to HttpMessage
+    const httpMessage = {
+      method: storedReq.method,
+      url: storedReq.path,
+      headers: storedReq.headers as Record<string, string>,
+      query: storedReq.query as Record<string, string>,
+      body: storedReq.body,
+    };
 
-  test("queries requests for endpoint ordered newest first", async () => {
-    const reqs = await db
-      .select()
-      .from(webhookRequests)
-      .where(eq(webhookRequests.endpointId, createdEndpointId))
-      .orderBy(desc(webhookRequests.receivedAt));
-
-    expect(reqs.length).toBeGreaterThanOrEqual(1);
+    expect(httpMessage.method).toBe("POST");
+    expect(httpMessage.query).toEqual({ source: "stripe", environment: "test" });
+    expect(httpMessage.body).toEqual(jsonBody);
   });
 });

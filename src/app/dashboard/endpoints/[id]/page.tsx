@@ -2,15 +2,16 @@
 
 import { use, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Navbar } from "@/components/navbar";
 import { CopyButton } from "@/components/copy-button";
 import { RequestList } from "@/components/request-list";
 import { EmptyState } from "@/components/empty-state";
 import { RequestResponseViewer, HttpMessage } from "@/components/ui/request-response-viewer";
 import { useSSE } from "@/hooks/use-sse";
+import { redactHeaders } from "@/lib/redaction";
 import { WebhookEndpoint, WebhookRequest } from "@/db/schema";
-import { ArrowLeft, Trash2, Calendar, RefreshCw, Terminal } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { ArrowLeft, Trash2, Calendar, RefreshCw, Clock, HardDrive, FileText } from "lucide-react";
 
 export default function EndpointDetailPage({
   params,
@@ -19,10 +20,13 @@ export default function EndpointDetailPage({
 }) {
   const { id: endpointId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [endpoint, setEndpoint] = useState<WebhookEndpoint | null>(null);
   const [requests, setRequests] = useState<WebhookRequest[]>([]);
-  const [selectedRequestId, setSelectedRequestId] = useState<string | undefined>(undefined);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | undefined>(
+    searchParams.get("request") || undefined
+  );
   const [loading, setLoading] = useState(true);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
 
@@ -42,12 +46,18 @@ export default function EndpointDetailPage({
       const reqData = await reqRes.json();
       if (reqRes.ok && reqData.requests) {
         setRequests(reqData.requests);
-        setSelectedRequestId((prev) => prev || (reqData.requests.length > 0 ? reqData.requests[0].id : undefined));
+        setSelectedRequestId((prev) => {
+          const urlReqId = searchParams.get("request");
+          if (urlReqId && reqData.requests.some((r: WebhookRequest) => r.id === urlReqId)) {
+            return urlReqId;
+          }
+          return prev || (reqData.requests.length > 0 ? reqData.requests[0].id : undefined);
+        });
       }
     } catch (err) {
       console.error("Failed to fetch requests:", err);
     }
-  }, [endpointId, searchQuery, methodFilter]);
+  }, [endpointId, searchQuery, methodFilter, searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -70,7 +80,10 @@ export default function EndpointDetailPage({
           if (epRes.ok && epData.endpoint) setEndpoint(epData.endpoint);
           if (reqRes.ok && reqData.requests) {
             setRequests(reqData.requests);
-            if (reqData.requests.length > 0) {
+            const urlReqId = searchParams.get("request");
+            if (urlReqId && reqData.requests.some((r: WebhookRequest) => r.id === urlReqId)) {
+              setSelectedRequestId(urlReqId);
+            } else if (reqData.requests.length > 0) {
               setSelectedRequestId((prev) => prev || reqData.requests[0].id);
             } else {
               setSelectedRequestId(undefined);
@@ -89,18 +102,29 @@ export default function EndpointDetailPage({
     return () => {
       active = false;
     };
-  }, [endpointId, searchQuery, methodFilter]);
+  }, [endpointId, searchQuery, methodFilter, searchParams]);
 
-  // Handle live SSE updates
+  // Handle request selection & URL update
+  const handleSelectRequest = useCallback((id: string) => {
+    setSelectedRequestId(id);
+    setShowMobileDetail(true);
+    const newSearchParams = new URLSearchParams(window.location.search);
+    newSearchParams.set("request", id);
+    window.history.replaceState(null, "", `?${newSearchParams.toString()}`);
+  }, []);
+
+  // Handle live SSE updates (PRESERVE USER'S CURRENT SELECTION)
   const handleNewRequest = useCallback((newReq: WebhookRequest) => {
     setRequests((prev) => {
-      // Deduplicate request by ID
       if (prev.some((r) => r.id === newReq.id)) return prev;
       return [newReq, ...prev];
     });
 
-    // Auto-select only if no request is currently selected
-    setSelectedRequestId((current) => current || newReq.id);
+    // Auto-select ONLY if user does NOT currently have a request selected
+    setSelectedRequestId((current) => {
+      if (current) return current;
+      return newReq.id;
+    });
   }, []);
 
   const { status: sseStatus } = useSSE({
@@ -117,6 +141,7 @@ export default function EndpointDetailPage({
         setRequests([]);
         setSelectedRequestId(undefined);
         setShowMobileDetail(false);
+        window.history.replaceState(null, "", window.location.pathname);
       }
     } catch (err) {
       console.error("Failed to clear requests:", err);
@@ -131,7 +156,13 @@ export default function EndpointDetailPage({
         setRequests((prev) => prev.filter((r) => r.id !== requestId));
         if (selectedRequestId === requestId) {
           const remaining = requests.filter((r) => r.id !== requestId);
-          setSelectedRequestId(remaining.length > 0 ? remaining[0].id : undefined);
+          const nextId = remaining.length > 0 ? remaining[0].id : undefined;
+          setSelectedRequestId(nextId);
+          if (nextId) {
+            window.history.replaceState(null, "", `?request=${nextId}`);
+          } else {
+            window.history.replaceState(null, "", window.location.pathname);
+          }
         }
       }
     } catch (err) {
@@ -165,15 +196,39 @@ export default function EndpointDetailPage({
       }
     : undefined;
 
-  function formatDate(dateStr?: string | Date) {
+  // Safe serialized JSON copy of request with REDACTED headers
+  const safeCopyRequestJson = selectedRequest
+    ? JSON.stringify(
+        {
+          method: selectedRequest.method,
+          path: selectedRequest.path,
+          query: selectedRequest.query || {},
+          headers: redactHeaders((selectedRequest.headers as Record<string, string>) || {}),
+          body: selectedRequest.body || selectedRequest.rawBody || null,
+        },
+        null,
+        2
+      )
+    : "";
+
+  function formatExactDate(dateStr?: string | Date) {
     if (!dateStr) return "";
-    return new Date(dateStr).toLocaleString([], {
+    const date = typeof dateStr === "string" ? new Date(dateStr) : dateStr;
+    return date.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
-      hour: "2-digit",
+      hour: "numeric",
       minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
     });
+  }
+
+  function formatBodySize(bytes?: number | null) {
+    if (bytes === undefined || bytes === null) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    return `${(bytes / 1024).toFixed(1)} KB`;
   }
 
   return (
@@ -198,7 +253,7 @@ export default function EndpointDetailPage({
                   {endpoint?.name || "Endpoint Details"}
                 </h1>
                 
-                {/* Realtime Connection Indicator */}
+                {/* Realtime Connection Status Indicator */}
                 {sseStatus === "live" ? (
                   <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-medium text-emerald-600 dark:text-emerald-400">
                     <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -225,7 +280,7 @@ export default function EndpointDetailPage({
             {endpoint && (
               <span className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                 <Calendar className="size-3.5" />
-                Created {formatDate(endpoint.createdAt)}
+                Created {formatExactDate(endpoint.createdAt)}
               </span>
             )}
 
@@ -263,10 +318,7 @@ export default function EndpointDetailPage({
               <RequestList
                 requests={requests}
                 selectedRequestId={selectedRequestId}
-                onSelectRequest={(id) => {
-                  setSelectedRequestId(id);
-                  setShowMobileDetail(true);
-                }}
+                onSelectRequest={handleSelectRequest}
                 onClearAll={handleClearAllRequests}
                 onDeleteRequest={handleDeleteSingleRequest}
                 searchQuery={searchQuery}
@@ -296,11 +348,32 @@ export default function EndpointDetailPage({
 
               {selectedRequest && httpMessage ? (
                 <div className="space-y-4">
-                  {/* Action Bar */}
-                  <div className="flex items-center justify-between border-b pb-3">
-                    <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                      <Terminal className="size-4" />
-                      <span>Received at {new Date(selectedRequest.receivedAt).toLocaleString()}</span>
+                  {/* Metadata Header Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3 font-mono text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="size-3.5 text-foreground/80" />
+                        <span className="text-foreground">{formatExactDate(selectedRequest.receivedAt)}</span>
+                      </div>
+
+                      {selectedRequest.contentType && (
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="size-3.5 text-foreground/80" />
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-foreground">
+                            {selectedRequest.contentType.split(";")[0]}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-1.5">
+                        <HardDrive className="size-3.5 text-foreground/80" />
+                        <span>{formatBodySize(selectedRequest.bodySize)}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <CopyButton text={selectedRequest.path} label="Copy Path" />
+                      <CopyButton text={safeCopyRequestJson} label="Copy Request JSON" />
                     </div>
                   </div>
 
