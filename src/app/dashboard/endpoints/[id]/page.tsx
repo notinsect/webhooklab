@@ -4,9 +4,11 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { CopyButton } from "@/components/copy-button";
+import { RequestList } from "@/components/request-list";
 import { EmptyState } from "@/components/empty-state";
-import { WebhookEndpoint } from "@/db/schema";
-import { ArrowLeft, Trash2, Calendar, RefreshCw } from "lucide-react";
+import { RequestResponseViewer, HttpMessage } from "@/components/ui/request-response-viewer";
+import { WebhookEndpoint, WebhookRequest } from "@/db/schema";
+import { ArrowLeft, Trash2, Calendar, RefreshCw, Terminal } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function EndpointDetailPage({
@@ -18,32 +20,88 @@ export default function EndpointDetailPage({
   const router = useRouter();
 
   const [endpoint, setEndpoint] = useState<WebhookEndpoint | null>(null);
+  const [requests, setRequests] = useState<WebhookRequest[]>([]);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const [showMobileDetail, setShowMobileDetail] = useState(false);
+
+  // Filter & Search states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [methodFilter, setMethodFilter] = useState("ALL");
+
   const baseUrl = typeof window !== "undefined" ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
 
   useEffect(() => {
     let active = true;
 
-    async function loadEndpoint() {
+    async function loadData() {
       try {
-        const res = await fetch(`/api/endpoints/${endpointId}`);
-        const data = await res.json();
-        if (active && res.ok && data.endpoint) {
-          setEndpoint(data.endpoint);
+        const queryParams = new URLSearchParams();
+        if (searchQuery) queryParams.set("q", searchQuery);
+        if (methodFilter && methodFilter !== "ALL") queryParams.set("method", methodFilter);
+
+        const [epRes, reqRes] = await Promise.all([
+          fetch(`/api/endpoints/${endpointId}`),
+          fetch(`/api/endpoints/${endpointId}/requests?${queryParams.toString()}`),
+        ]);
+
+        const epData = await epRes.json();
+        const reqData = await reqRes.json();
+
+        if (active) {
+          if (epRes.ok && epData.endpoint) setEndpoint(epData.endpoint);
+          if (reqRes.ok && reqData.requests) {
+            setRequests(reqData.requests);
+            if (reqData.requests.length > 0) {
+              setSelectedRequestId((prev) => prev || reqData.requests[0].id);
+            } else {
+              setSelectedRequestId(undefined);
+            }
+          }
         }
       } catch (err) {
-        console.error("Failed to fetch endpoint:", err);
+        console.error("Failed to fetch endpoint details:", err);
       } finally {
         if (active) setLoading(false);
       }
     }
 
-    loadEndpoint();
+    loadData();
 
     return () => {
       active = false;
     };
-  }, [endpointId]);
+  }, [endpointId, searchQuery, methodFilter]);
+
+  async function handleClearAllRequests() {
+    if (!confirm("Are you sure you want to clear all requests for this endpoint?")) return;
+    try {
+      const res = await fetch(`/api/endpoints/${endpointId}/requests`, { method: "DELETE" });
+      if (res.ok) {
+        setRequests([]);
+        setSelectedRequestId(undefined);
+        setShowMobileDetail(false);
+      }
+    } catch (err) {
+      console.error("Failed to clear requests:", err);
+    }
+  }
+
+  async function handleDeleteSingleRequest(requestId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/requests/${requestId}`, { method: "DELETE" });
+      if (res.ok) {
+        setRequests((prev) => prev.filter((r) => r.id !== requestId));
+        if (selectedRequestId === requestId) {
+          const remaining = requests.filter((r) => r.id !== requestId);
+          setSelectedRequestId(remaining.length > 0 ? remaining[0].id : undefined);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete request:", err);
+    }
+  }
 
   async function handleDeleteEndpoint() {
     if (!confirm("Are you sure you want to delete this endpoint?")) return;
@@ -57,7 +115,19 @@ export default function EndpointDetailPage({
     }
   }
 
+  const selectedRequest = requests.find((r) => r.id === selectedRequestId);
   const webhookUrl = endpoint ? `${baseUrl}/h/${endpoint.token}` : "";
+
+  // Prepare HTTP Message payload for Varnus RequestResponseViewer component
+  const httpMessage: HttpMessage | undefined = selectedRequest
+    ? {
+        method: selectedRequest.method,
+        url: `${webhookUrl}${selectedRequest.path}`,
+        headers: (selectedRequest.headers as Record<string, string>) || {},
+        query: (selectedRequest.query as Record<string, string>) || {},
+        body: selectedRequest.body || selectedRequest.rawBody || undefined,
+      }
+    : undefined;
 
   function formatDate(dateStr?: string | Date) {
     if (!dateStr) return "";
@@ -75,8 +145,8 @@ export default function EndpointDetailPage({
       <Navbar />
 
       {/* Top Endpoint Header Bar */}
-      <div className="border-b bg-muted/20 px-4 py-4">
-        <div className="container mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 max-w-5xl">
+      <div className="border-b bg-muted/20 px-4 py-3">
+        <div className="container mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 max-w-7xl">
           <div className="flex items-center gap-3 min-w-0">
             <Link
               href="/dashboard"
@@ -88,11 +158,11 @@ export default function EndpointDetailPage({
 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="font-semibold text-foreground text-lg truncate">
+                <h1 className="font-semibold text-foreground text-base truncate">
                   {endpoint?.name || "Endpoint Details"}
                 </h1>
-                <span className="inline-flex items-center gap-1 rounded bg-blue-500/10 px-2 py-0.5 text-[10px] font-mono font-medium text-blue-600 dark:text-blue-400">
-                  Phase 1 Endpoint
+                <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-[10px] font-mono font-medium text-muted-foreground">
+                  {requests.length} {requests.length === 1 ? "request" : "requests"}
                 </span>
               </div>
 
@@ -105,9 +175,9 @@ export default function EndpointDetailPage({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+          <div className="flex items-center gap-3 self-end md:self-center shrink-0">
             {endpoint && (
-              <span className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+              <span className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                 <Calendar className="size-3.5" />
                 Created {formatDate(endpoint.createdAt)}
               </span>
@@ -116,29 +186,87 @@ export default function EndpointDetailPage({
             <button
               type="button"
               onClick={handleDeleteEndpoint}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs text-muted-foreground hover:bg-red-500/10 hover:text-red-600 transition-colors"
+              className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs text-muted-foreground hover:bg-red-500/10 hover:text-red-600 transition-colors"
               title="Delete Endpoint"
             >
               <Trash2 className="size-3.5" />
-              <span>Delete Endpoint</span>
+              <span className="hidden sm:inline">Delete Endpoint</span>
             </button>
           </div>
         </div>
       </div>
 
       {/* Main Content Pane */}
-      <main className="flex-1 container mx-auto px-4 py-12 max-w-4xl flex items-center justify-center">
+      <main className="flex-1 flex overflow-hidden container mx-auto px-0 max-w-7xl">
         {loading ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
+          <div className="flex-1 flex items-center justify-center py-20 text-muted-foreground">
             <RefreshCw className="size-6 animate-spin" style={{ animationDuration: '2s' }} />
           </div>
-        ) : !endpoint ? (
-          <div className="text-center text-sm text-muted-foreground">
-            Endpoint not found or deleted.
+        ) : requests.length === 0 && !searchQuery && methodFilter === "ALL" ? (
+          <div className="flex-1 p-6 flex items-center justify-center">
+            <EmptyState webhookUrl={webhookUrl} />
           </div>
         ) : (
-          <div className="w-full">
-            <EmptyState webhookUrl={webhookUrl} />
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
+            {/* Left Column: Request List */}
+            <div
+              className={`md:col-span-5 lg:col-span-4 h-full overflow-hidden ${
+                showMobileDetail ? "hidden md:block" : "block"
+              }`}
+            >
+              <RequestList
+                requests={requests}
+                selectedRequestId={selectedRequestId}
+                onSelectRequest={(id) => {
+                  setSelectedRequestId(id);
+                  setShowMobileDetail(true);
+                }}
+                onClearAll={handleClearAllRequests}
+                onDeleteRequest={handleDeleteSingleRequest}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                methodFilter={methodFilter}
+                onMethodFilterChange={setMethodFilter}
+              />
+            </div>
+
+            {/* Right Column: Request Details Inspector */}
+            <div
+              className={`md:col-span-7 lg:col-span-8 h-full overflow-y-auto p-4 space-y-4 ${
+                showMobileDetail ? "block" : "hidden md:block"
+              }`}
+            >
+              {/* Mobile Back Button */}
+              <div className="md:hidden flex items-center justify-between border-b pb-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileDetail(false)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ArrowLeft className="size-3.5" />
+                  <span>Back to Requests List</span>
+                </button>
+              </div>
+
+              {selectedRequest && httpMessage ? (
+                <div className="space-y-4">
+                  {/* Action Bar */}
+                  <div className="flex items-center justify-between border-b pb-3">
+                    <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                      <Terminal className="size-4" />
+                      <span>Received at {new Date(selectedRequest.receivedAt).toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  {/* Varnus Component Request / Response Viewer */}
+                  <RequestResponseViewer request={httpMessage} />
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center p-12 text-center text-xs text-muted-foreground">
+                  Select a request from the list to inspect headers, query parameters, and body content.
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>

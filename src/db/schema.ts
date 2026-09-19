@@ -45,7 +45,7 @@ export const webhookRequests = pgTable(
   },
   (table) => [
     index("webhook_requests_endpoint_id_idx").on(table.endpointId),
-    index("webhook_requests_received_at_idx").on(table.receivedAt),
+    index("webhook_requests_endpoint_received_idx").on(table.endpointId, table.receivedAt),
   ]
 );
 
