@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookEndpoints, webhookRequests } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { publishNewRequest } from "@/lib/sse";
 
 const MAX_PAYLOAD_SIZE = 1024 * 1024; // 1 MB limit
 
@@ -102,22 +103,28 @@ async function handleWebhookIngestion(
   const userAgent = req.headers.get("user-agent") || undefined;
 
   // 6. Save Request to PostgreSQL
-  await db.insert(webhookRequests).values({
-    endpointId: endpoint.id,
-    method: req.method.toUpperCase(),
-    path: req.nextUrl.pathname + req.nextUrl.search,
-    query: Object.keys(queryObj).length > 0 ? queryObj : null,
-    headers: headersObj,
-    body: parsedBody,
-    rawBody: rawBody || null,
-    contentType: contentType || null,
-    bodySize,
-    ipAddress,
-    userAgent,
-    receivedAt: new Date(),
-  });
+  const [newRequest] = await db
+    .insert(webhookRequests)
+    .values({
+      endpointId: endpoint.id,
+      method: req.method.toUpperCase(),
+      path: req.nextUrl.pathname + req.nextUrl.search,
+      query: Object.keys(queryObj).length > 0 ? queryObj : null,
+      headers: headersObj,
+      body: parsedBody,
+      rawBody: rawBody || null,
+      contentType: contentType || null,
+      bodySize,
+      ipAddress,
+      userAgent,
+      receivedAt: new Date(),
+    })
+    .returning();
 
-  // 7. Return 200 OK Response
+  // 7. Publish Realtime SSE Event
+  publishNewRequest(endpoint.id, newRequest);
+
+  // 8. Return 200 OK Response
   return NextResponse.json(
     { received: true },
     { status: 200 }

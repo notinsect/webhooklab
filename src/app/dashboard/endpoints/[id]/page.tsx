@@ -1,12 +1,13 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { CopyButton } from "@/components/copy-button";
 import { RequestList } from "@/components/request-list";
 import { EmptyState } from "@/components/empty-state";
 import { RequestResponseViewer, HttpMessage } from "@/components/ui/request-response-viewer";
+import { useSSE } from "@/hooks/use-sse";
 import { WebhookEndpoint, WebhookRequest } from "@/db/schema";
 import { ArrowLeft, Trash2, Calendar, RefreshCw, Terminal } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -30,6 +31,23 @@ export default function EndpointDetailPage({
   const [methodFilter, setMethodFilter] = useState("ALL");
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
+
+  const fetchRequests = useCallback(async () => {
+    try {
+      const queryParams = new URLSearchParams();
+      if (searchQuery) queryParams.set("q", searchQuery);
+      if (methodFilter && methodFilter !== "ALL") queryParams.set("method", methodFilter);
+
+      const reqRes = await fetch(`/api/endpoints/${endpointId}/requests?${queryParams.toString()}`);
+      const reqData = await reqRes.json();
+      if (reqRes.ok && reqData.requests) {
+        setRequests(reqData.requests);
+        setSelectedRequestId((prev) => prev || (reqData.requests.length > 0 ? reqData.requests[0].id : undefined));
+      }
+    } catch (err) {
+      console.error("Failed to fetch requests:", err);
+    }
+  }, [endpointId, searchQuery, methodFilter]);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +90,24 @@ export default function EndpointDetailPage({
       active = false;
     };
   }, [endpointId, searchQuery, methodFilter]);
+
+  // Handle live SSE updates
+  const handleNewRequest = useCallback((newReq: WebhookRequest) => {
+    setRequests((prev) => {
+      // Deduplicate request by ID
+      if (prev.some((r) => r.id === newReq.id)) return prev;
+      return [newReq, ...prev];
+    });
+
+    // Auto-select only if no request is currently selected
+    setSelectedRequestId((current) => current || newReq.id);
+  }, []);
+
+  const { status: sseStatus } = useSSE({
+    endpointId,
+    onNewRequest: handleNewRequest,
+    onReconnect: fetchRequests,
+  });
 
   async function handleClearAllRequests() {
     if (!confirm("Are you sure you want to clear all requests for this endpoint?")) return;
@@ -161,9 +197,19 @@ export default function EndpointDetailPage({
                 <h1 className="font-semibold text-foreground text-base truncate">
                   {endpoint?.name || "Endpoint Details"}
                 </h1>
-                <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-[10px] font-mono font-medium text-muted-foreground">
-                  {requests.length} {requests.length === 1 ? "request" : "requests"}
-                </span>
+                
+                {/* Realtime Connection Indicator */}
+                {sseStatus === "live" ? (
+                  <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-medium text-emerald-600 dark:text-emerald-400">
+                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Live</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded bg-amber-500/10 px-2 py-0.5 text-[10px] font-mono font-medium text-amber-600 dark:text-amber-400">
+                    <span className="size-1.5 rounded-full bg-amber-500 animate-ping" />
+                    <span>Reconnecting...</span>
+                  </span>
+                )}
               </div>
 
               {webhookUrl && (

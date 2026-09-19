@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { WebhookRequest } from "@/db/schema";
+
+export type SSEStatus = "connecting" | "live" | "reconnecting";
 
 export function useSSE({
   endpointId,
@@ -12,6 +14,7 @@ export function useSSE({
   onNewRequest: (req: WebhookRequest) => void;
   onReconnect?: () => void;
 }) {
+  const [status, setStatus] = useState<SSEStatus>("connecting");
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -24,6 +27,10 @@ export function useSSE({
       const es = new EventSource(url);
       eventSourceRef.current = es;
 
+      es.onopen = () => {
+        setStatus("live");
+      };
+
       es.addEventListener("request_created", (event) => {
         try {
           const reqData: WebhookRequest = JSON.parse(event.data);
@@ -34,8 +41,8 @@ export function useSSE({
       });
 
       es.onerror = () => {
+        setStatus("reconnecting");
         es.close();
-        // Schedule auto-reconnect after 3 seconds
         reconnectTimer = setTimeout(() => {
           connect();
           if (onReconnect) onReconnect();
@@ -45,7 +52,7 @@ export function useSSE({
 
     connect();
 
-    // Trigger sync on tab focus
+    // Trigger state sync on window focus
     function handleFocus() {
       if (onReconnect) onReconnect();
     }
@@ -59,4 +66,6 @@ export function useSSE({
       window.removeEventListener("focus", handleFocus);
     };
   }, [endpointId, onNewRequest, onReconnect]);
+
+  return { status };
 }

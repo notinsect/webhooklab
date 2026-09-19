@@ -1,30 +1,30 @@
 "use client";
 
 import { CopyButton } from "./copy-button";
-import { Terminal, Inbox } from "lucide-react";
+import { Terminal, RefreshCw } from "lucide-react";
 
 export function EmptyState({ webhookUrl }: { webhookUrl: string }) {
   const curlExample = `curl -i -X POST "${webhookUrl}" \\
   -H "Content-Type: application/json" \\
-  -H "X-Webhook-Test: active" \\
+  -H "X-Webhook-Test: realtime" \\
   -d '{
     "event": "payment.completed",
-    "id": "evt_123",
+    "id": "evt_realtime_001",
     "amount": 2499,
     "currency": "INR"
   }'`;
 
   return (
     <div className="flex flex-col items-center justify-center p-8 text-center border rounded-xl bg-card">
-      <div className="flex size-12 items-center justify-center rounded-full bg-muted mb-4">
-        <Inbox className="size-6 text-muted-foreground" />
+      <div className="flex size-12 items-center justify-center rounded-full bg-muted mb-4 animate-pulse">
+        <RefreshCw className="size-6 text-muted-foreground animate-spin" style={{ animationDuration: '3s' }} />
       </div>
 
       <h3 className="text-lg font-semibold tracking-tight text-foreground mb-1">
-        Waiting for requests
+        Waiting for incoming requests...
       </h3>
       <p className="text-sm text-muted-foreground max-w-md mb-6">
-        Send an HTTP request to your endpoint URL to capture and inspect its payload.
+        Send an HTTP request to your endpoint URL and it will appear here in real time.
       </p>
 
       <div className="w-full max-w-xl text-left rounded-lg border bg-muted/40 p-4 font-mono text-xs">
