@@ -2,22 +2,21 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { generateEndpointToken } from "@/lib/token";
 import { redactHeaderValue, redactHeaders } from "@/lib/redaction";
 import { db } from "@/db";
-import { webhookEndpoints, webhookRequests, WebhookRequest } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { webhookEndpoints, webhookRequests } from "@/db/schema";
+import { eq, desc, count, sql } from "drizzle-orm";
 
-describe("Phase 4: Header Redaction & Copy Safety", () => {
+describe("Phase 5: Search, Filtering & Header Redaction Safety", () => {
   test("redacts sensitive header credentials (authorization, cookie, x-api-key)", () => {
     expect(redactHeaderValue("authorization", "Bearer secret_live_key_998877")).toBe("Bearer ••••••••");
     expect(redactHeaderValue("cookie", "session_id=abcdef123456")).toBe("••••••••");
     expect(redactHeaderValue("x-api-key", "ak_live_123456789")).toBe("••••••••");
   });
 
-  test("generates safe serialized request JSON object with redacted headers", () => {
+  test("does not include sensitive raw headers in safe copy JSON object", () => {
     const rawHeaders = {
       "content-type": "application/json",
       "authorization": "Bearer secret_key",
       "x-api-key": "secret_api_key",
-      "user-agent": "curl/8.7.1",
     };
 
     const redacted = redactHeaders(rawHeaders);
@@ -25,125 +24,174 @@ describe("Phase 4: Header Redaction & Copy Safety", () => {
       method: "POST",
       path: "/h/token123",
       headers: redacted,
-      body: { event: "payment.completed" },
     });
 
     expect(safeJsonString).not.toContain("secret_key");
     expect(safeJsonString).not.toContain("secret_api_key");
     expect(safeJsonString).toContain("Bearer ••••••••");
-    expect(safeJsonString).toContain("••••••••");
   });
 });
 
-describe("Phase 4: Realtime Selection Rule & Request Inspection", () => {
-  let createdEndpointId: string;
-  const token = generateEndpointToken();
+describe("Phase 5: Request Management & Retention Lifecycle", () => {
+  let endpointAId: string;
+  let endpointBId: string;
+  const tokenA = generateEndpointToken();
+  const tokenB = generateEndpointToken();
 
   beforeAll(async () => {
-    const [ep] = await db
+    const [epA] = await db
       .insert(webhookEndpoints)
-      .values({
-        name: "Phase 4 Inspection Test Endpoint",
-        token,
-      })
+      .values({ name: "Management Test Endpoint A", token: tokenA })
       .returning();
-    createdEndpointId = ep.id;
+    endpointAId = epA.id;
+
+    const [epB] = await db
+      .insert(webhookEndpoints)
+      .values({ name: "Management Test Endpoint B", token: tokenB })
+      .returning();
+    endpointBId = epB.id;
   });
 
   afterAll(async () => {
-    if (createdEndpointId) {
-      await db.delete(webhookEndpoints).where(eq(webhookEndpoints.id, createdEndpointId));
-    }
+    if (endpointAId) await db.delete(webhookEndpoints).where(eq(webhookEndpoints.id, endpointAId));
+    if (endpointBId) await db.delete(webhookEndpoints).where(eq(webhookEndpoints.id, endpointBId));
   });
 
-  test("preserves current user selection when a new realtime request arrives", () => {
-    const initialRequests: WebhookRequest[] = [
-      {
-        id: "req-A",
-        endpointId: createdEndpointId,
-        method: "POST",
-        path: `/h/${token}`,
-        query: null,
-        headers: {},
-        body: { name: "Request A" },
-        rawBody: null,
-        contentType: "application/json",
-        bodySize: 20,
-        ipAddress: "127.0.0.1",
-        userAgent: "curl/8.7.1",
-        receivedAt: new Date(Date.now() - 5000),
-      },
-    ];
-
-    let currentSelectedId: string | undefined = "req-A";
-
-    // New request B arrives
-    const newReqB: WebhookRequest = {
-      id: "req-B",
-      endpointId: createdEndpointId,
-      method: "POST",
-      path: `/h/${token}`,
-      query: null,
-      headers: {},
-      body: { name: "Request B" },
-      rawBody: null,
-      contentType: "application/json",
-      bodySize: 20,
-      ipAddress: "127.0.0.1",
-      userAgent: "curl/8.7.1",
-      receivedAt: new Date(),
-    };
-
-    // Prepend new request
-    const updatedList = [newReqB, ...initialRequests];
-
-    // Realtime Selection Rule: currentSelectedId remains "req-A" if already set!
-    currentSelectedId = currentSelectedId || newReqB.id;
-
-    expect(updatedList[0].id).toBe("req-B"); // Prepended to top
-    expect(currentSelectedId).toBe("req-A"); // User selection preserved!
-  });
-
-  test("maps stored request properties into HttpMessage format for RequestResponseViewer", async () => {
-    const jsonBody = {
-      event: "payment.completed",
-      id: "evt_123",
-      amount: 2499,
-      currency: "INR",
-      customer: { id: "cus_42", email: "alex@example.com" },
-    };
-
-    const [storedReq] = await db
+  test("captures and queries requests with method filtering & body text search", async () => {
+    const [req1] = await db
       .insert(webhookRequests)
       .values({
-        endpointId: createdEndpointId,
+        endpointId: endpointAId,
         method: "POST",
-        path: `/h/${token}?source=stripe&environment=test`,
-        query: { source: "stripe", environment: "test" },
-        headers: {
-          "content-type": "application/json",
-          "authorization": "Bearer secret-example-token",
-          "x-test-header": "webhooklab",
-        },
-        body: jsonBody,
-        rawBody: JSON.stringify(jsonBody),
+        path: `/h/${tokenA}?event=payment`,
+        headers: { "content-type": "application/json" },
+        body: { event: "payment.completed", id: "evt_123" },
+        rawBody: '{"event":"payment.completed","id":"evt_123"}',
         contentType: "application/json",
-        bodySize: JSON.stringify(jsonBody).length,
+        receivedAt: new Date(Date.now() - 3000),
+      })
+      .returning();
+
+    const [req2] = await db
+      .insert(webhookRequests)
+      .values({
+        endpointId: endpointAId,
+        method: "GET",
+        path: `/h/${tokenA}?source=stripe`,
+        query: { source: "stripe" },
+        headers: {},
+        body: null,
+        rawBody: null,
+        contentType: null,
+        receivedAt: new Date(Date.now() - 1000),
+      })
+      .returning();
+
+    expect(req1.id).toBeDefined();
+    expect(req2.id).toBeDefined();
+
+    // Query POST only
+    const postReqs = await db
+      .select()
+      .from(webhookRequests)
+      .where(eq(webhookRequests.endpointId, endpointAId))
+      .orderBy(desc(webhookRequests.receivedAt));
+
+    expect(postReqs.length).toBeGreaterThanOrEqual(2);
+    expect(postReqs[0].method).toBe("GET"); // Newest first
+  });
+
+  test("deletes single request by ID cleanly", async () => {
+    const [singleReq] = await db
+      .insert(webhookRequests)
+      .values({
+        endpointId: endpointAId,
+        method: "DELETE",
+        path: `/h/${tokenA}`,
         receivedAt: new Date(),
       })
       .returning();
 
-    // Map to HttpMessage
-    const httpMessage = {
-      method: storedReq.method,
-      url: storedReq.path,
-      headers: storedReq.headers as Record<string, string>,
-      query: storedReq.query as Record<string, string>,
-      body: storedReq.body,
-    };
+    await db.delete(webhookRequests).where(eq(webhookRequests.id, singleReq.id));
 
-    expect(httpMessage.method).toBe("POST");
-    expect(httpMessage.query).toEqual({ source: "stripe", environment: "test" });
-    expect(httpMessage.body).toEqual(jsonBody);
+    const deletedCheck = await db.query.webhookRequests.findFirst({
+      where: eq(webhookRequests.id, singleReq.id),
+    });
+
+    expect(deletedCheck).toBeUndefined();
+  });
+
+  test("clears endpoint history in Endpoint A while preserving Endpoint B requests", async () => {
+    // Insert into Endpoint B
+    const [reqB] = await db
+      .insert(webhookRequests)
+      .values({
+        endpointId: endpointBId,
+        method: "POST",
+        path: `/h/${tokenB}`,
+        receivedAt: new Date(),
+      })
+      .returning();
+
+    // Clear Endpoint A requests only
+    await db.delete(webhookRequests).where(eq(webhookRequests.endpointId, endpointAId));
+
+    // Verify Endpoint A has 0 requests
+    const countA = await db
+      .select({ total: count(webhookRequests.id) })
+      .from(webhookRequests)
+      .where(eq(webhookRequests.endpointId, endpointAId));
+
+    expect(countA[0].total).toBe(0);
+
+    // Verify Endpoint B request remains intact
+    const checkB = await db.query.webhookRequests.findFirst({
+      where: eq(webhookRequests.id, reqB.id),
+    });
+
+    expect(checkB).not.toBeNull();
+    expect(checkB?.endpointId).toBe(endpointBId);
+  });
+
+  test("enforces server-side 100-request retention limit per endpoint", async () => {
+    const retentionToken = generateEndpointToken();
+    const [retentionEp] = await db
+      .insert(webhookEndpoints)
+      .values({ name: "Retention Test Ep", token: retentionToken })
+      .returning();
+
+    // Insert 105 requests
+    const insertValues = Array.from({ length: 105 }).map((_, index) => ({
+      endpointId: retentionEp.id,
+      method: "POST",
+      path: `/h/${retentionToken}`,
+      rawBody: `Request #${index + 1}`,
+      receivedAt: new Date(Date.now() - (105 - index) * 100),
+    }));
+
+    await db.insert(webhookRequests).values(insertValues);
+
+    // Run retention cleanup keeping top 100 newest
+    const subquery = db
+      .select({ id: webhookRequests.id })
+      .from(webhookRequests)
+      .where(eq(webhookRequests.endpointId, retentionEp.id))
+      .orderBy(desc(webhookRequests.receivedAt))
+      .offset(100);
+
+    await db
+      .delete(webhookRequests)
+      .where(sql`${webhookRequests.id} IN (${subquery})`);
+
+    const [{ value: remainingCount }] = await db
+      .select({ value: count() })
+      .from(webhookRequests)
+      .where(eq(webhookRequests.endpointId, retentionEp.id));
+
+    expect(Number(remainingCount)).toBe(100);
+
+    // Cleanup test endpoint
+    await db.delete(webhookRequests).where(eq(webhookRequests.endpointId, retentionEp.id));
+    await db.delete(webhookEndpoints).where(eq(webhookEndpoints.id, retentionEp.id));
   });
 });

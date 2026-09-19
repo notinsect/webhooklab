@@ -24,28 +24,70 @@ export default function EndpointDetailPage({
 
   const [endpoint, setEndpoint] = useState<WebhookEndpoint | null>(null);
   const [requests, setRequests] = useState<WebhookRequest[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(Math.max(1, parseInt(searchParams.get("page") || "1", 10)));
+  const [totalPages, setTotalPages] = useState(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | undefined>(
     searchParams.get("request") || undefined
   );
   const [loading, setLoading] = useState(true);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
 
-  // Filter & Search states
-  const [searchQuery, setSearchQuery] = useState("");
-  const [methodFilter, setMethodFilter] = useState("ALL");
+  // Search & Filter states
+  const [searchQueryInput, setSearchQueryInput] = useState(searchParams.get("q") || "");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchParams.get("q") || "");
+  const [methodFilter, setMethodFilter] = useState(searchParams.get("method") || "ALL");
+
+  // Realtime notification banner counter for Page > 1
+  const [newRequestsAvailableCount, setNewRequestsAvailableCount] = useState(0);
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
+
+  // 300ms Debounce search input
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQueryInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQueryInput]);
+
+  // Sync state to URL search params
+  const updateUrlParams = useCallback(
+    (opts: { reqId?: string; q?: string; method?: string; pageNum?: number }) => {
+      const p = new URLSearchParams();
+      const currentReqId = opts.reqId !== undefined ? opts.reqId : selectedRequestId;
+      const currentQ = opts.q !== undefined ? opts.q : debouncedSearchQuery;
+      const currentMethod = opts.method !== undefined ? opts.method : methodFilter;
+      const currentPage = opts.pageNum !== undefined ? opts.pageNum : page;
+
+      if (currentReqId) p.set("request", currentReqId);
+      if (currentQ) p.set("q", currentQ);
+      if (currentMethod && currentMethod !== "ALL") p.set("method", currentMethod);
+      if (currentPage > 1) p.set("page", String(currentPage));
+
+      const queryStr = p.toString();
+      const newUrl = queryStr ? `?${queryStr}` : window.location.pathname;
+      window.history.replaceState(null, "", newUrl);
+    },
+    [selectedRequestId, debouncedSearchQuery, methodFilter, page]
+  );
 
   const fetchRequests = useCallback(async () => {
     try {
       const queryParams = new URLSearchParams();
-      if (searchQuery) queryParams.set("q", searchQuery);
+      if (debouncedSearchQuery) queryParams.set("q", debouncedSearchQuery);
       if (methodFilter && methodFilter !== "ALL") queryParams.set("method", methodFilter);
+      queryParams.set("page", String(page));
+      queryParams.set("limit", "25");
 
       const reqRes = await fetch(`/api/endpoints/${endpointId}/requests?${queryParams.toString()}`);
       const reqData = await reqRes.json();
       if (reqRes.ok && reqData.requests) {
         setRequests(reqData.requests);
+        setTotalCount(reqData.totalCount);
+        setTotalPages(reqData.totalPages || 1);
+
         setSelectedRequestId((prev) => {
           const urlReqId = searchParams.get("request");
           if (urlReqId && reqData.requests.some((r: WebhookRequest) => r.id === urlReqId)) {
@@ -57,7 +99,7 @@ export default function EndpointDetailPage({
     } catch (err) {
       console.error("Failed to fetch requests:", err);
     }
-  }, [endpointId, searchQuery, methodFilter, searchParams]);
+  }, [endpointId, debouncedSearchQuery, methodFilter, page, searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -65,8 +107,10 @@ export default function EndpointDetailPage({
     async function loadData() {
       try {
         const queryParams = new URLSearchParams();
-        if (searchQuery) queryParams.set("q", searchQuery);
+        if (debouncedSearchQuery) queryParams.set("q", debouncedSearchQuery);
         if (methodFilter && methodFilter !== "ALL") queryParams.set("method", methodFilter);
+        queryParams.set("page", String(page));
+        queryParams.set("limit", "25");
 
         const [epRes, reqRes] = await Promise.all([
           fetch(`/api/endpoints/${endpointId}`),
@@ -80,6 +124,9 @@ export default function EndpointDetailPage({
           if (epRes.ok && epData.endpoint) setEndpoint(epData.endpoint);
           if (reqRes.ok && reqData.requests) {
             setRequests(reqData.requests);
+            setTotalCount(reqData.totalCount);
+            setTotalPages(reqData.totalPages || 1);
+
             const urlReqId = searchParams.get("request");
             if (urlReqId && reqData.requests.some((r: WebhookRequest) => r.id === urlReqId)) {
               setSelectedRequestId(urlReqId);
@@ -102,30 +149,54 @@ export default function EndpointDetailPage({
     return () => {
       active = false;
     };
-  }, [endpointId, searchQuery, methodFilter, searchParams]);
+  }, [endpointId, debouncedSearchQuery, methodFilter, page, searchParams]);
 
   // Handle request selection & URL update
-  const handleSelectRequest = useCallback((id: string) => {
-    setSelectedRequestId(id);
-    setShowMobileDetail(true);
-    const newSearchParams = new URLSearchParams(window.location.search);
-    newSearchParams.set("request", id);
-    window.history.replaceState(null, "", `?${newSearchParams.toString()}`);
-  }, []);
+  const handleSelectRequest = useCallback(
+    (id: string) => {
+      setSelectedRequestId(id);
+      setShowMobileDetail(true);
+      updateUrlParams({ reqId: id });
+    },
+    [updateUrlParams]
+  );
 
-  // Handle live SSE updates (PRESERVE USER'S CURRENT SELECTION)
-  const handleNewRequest = useCallback((newReq: WebhookRequest) => {
-    setRequests((prev) => {
-      if (prev.some((r) => r.id === newReq.id)) return prev;
-      return [newReq, ...prev];
-    });
+  // Handle live SSE updates (FILTER & PAGINATION SAFE)
+  const handleNewRequest = useCallback(
+    (newReq: WebhookRequest) => {
+      // Check if new request matches active method filter
+      if (methodFilter !== "ALL" && newReq.method !== methodFilter) {
+        return;
+      }
 
-    // Auto-select ONLY if user does NOT currently have a request selected
-    setSelectedRequestId((current) => {
-      if (current) return current;
-      return newReq.id;
-    });
-  }, []);
+      // Check if new request matches active debounced search query
+      if (debouncedSearchQuery) {
+        const qLower = debouncedSearchQuery.toLowerCase();
+        const matchesMethod = newReq.method.toLowerCase().includes(qLower);
+        const matchesPath = newReq.path.toLowerCase().includes(qLower);
+        const matchesBody = newReq.rawBody ? newReq.rawBody.toLowerCase().includes(qLower) : false;
+        const matchesContentType = newReq.contentType ? newReq.contentType.toLowerCase().includes(qLower) : false;
+        if (!matchesMethod && !matchesPath && !matchesBody && !matchesContentType) {
+          return;
+        }
+      }
+
+      // If user is on Page 1, prepend request directly
+      if (page === 1) {
+        setRequests((prev) => {
+          if (prev.some((r) => r.id === newReq.id)) return prev;
+          // Retain latest 25 on page 1 view
+          return [newReq, ...prev.slice(0, 24)];
+        });
+        setTotalCount((prev) => Math.min(100, prev + 1));
+        setSelectedRequestId((current) => current || newReq.id);
+      } else {
+        // User browsing older history (Page > 1): show banner notification
+        setNewRequestsAvailableCount((prev) => prev + 1);
+      }
+    },
+    [page, methodFilter, debouncedSearchQuery]
+  );
 
   const { status: sseStatus } = useSSE({
     endpointId,
@@ -133,15 +204,32 @@ export default function EndpointDetailPage({
     onReconnect: fetchRequests,
   });
 
+  const handleClearFilters = useCallback(() => {
+    setSearchQueryInput("");
+    setDebouncedSearchQuery("");
+    setMethodFilter("ALL");
+    setPage(1);
+    updateUrlParams({ q: "", method: "ALL", pageNum: 1 });
+  }, [updateUrlParams]);
+
+  const handleSyncNewRequests = useCallback(() => {
+    setPage(1);
+    setNewRequestsAvailableCount(0);
+    fetchRequests();
+    updateUrlParams({ pageNum: 1 });
+  }, [fetchRequests, updateUrlParams]);
+
   async function handleClearAllRequests() {
-    if (!confirm("Are you sure you want to clear all requests for this endpoint?")) return;
+    if (!confirm("Clear captured requests?\n\nThis will permanently delete all requests captured by this endpoint.")) return;
     try {
       const res = await fetch(`/api/endpoints/${endpointId}/requests`, { method: "DELETE" });
       if (res.ok) {
         setRequests([]);
+        setTotalCount(0);
+        setTotalPages(1);
         setSelectedRequestId(undefined);
         setShowMobileDetail(false);
-        window.history.replaceState(null, "", window.location.pathname);
+        updateUrlParams({ reqId: "", pageNum: 1 });
       }
     } catch (err) {
       console.error("Failed to clear requests:", err);
@@ -154,15 +242,12 @@ export default function EndpointDetailPage({
       const res = await fetch(`/api/requests/${requestId}`, { method: "DELETE" });
       if (res.ok) {
         setRequests((prev) => prev.filter((r) => r.id !== requestId));
+        setTotalCount((prev) => Math.max(0, prev - 1));
         if (selectedRequestId === requestId) {
           const remaining = requests.filter((r) => r.id !== requestId);
           const nextId = remaining.length > 0 ? remaining[0].id : undefined;
           setSelectedRequestId(nextId);
-          if (nextId) {
-            window.history.replaceState(null, "", `?request=${nextId}`);
-          } else {
-            window.history.replaceState(null, "", window.location.pathname);
-          }
+          updateUrlParams({ reqId: nextId || "" });
         }
       }
     } catch (err) {
@@ -171,7 +256,7 @@ export default function EndpointDetailPage({
   }
 
   async function handleDeleteEndpoint() {
-    if (!confirm("Are you sure you want to delete this endpoint?")) return;
+    if (!confirm("Are you sure you want to delete this endpoint and all its settings?")) return;
     try {
       const res = await fetch(`/api/endpoints/${endpointId}`, { method: "DELETE" });
       if (res.ok) {
@@ -280,7 +365,7 @@ export default function EndpointDetailPage({
             {endpoint && (
               <span className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
                 <Calendar className="size-3.5" />
-                Created {formatExactDate(endpoint.createdAt)}
+                Retains latest 100 requests
               </span>
             )}
 
@@ -303,7 +388,7 @@ export default function EndpointDetailPage({
           <div className="flex-1 flex items-center justify-center py-20 text-muted-foreground">
             <RefreshCw className="size-6 animate-spin" style={{ animationDuration: '2s' }} />
           </div>
-        ) : requests.length === 0 && !searchQuery && methodFilter === "ALL" ? (
+        ) : requests.length === 0 && !debouncedSearchQuery && methodFilter === "ALL" ? (
           <div className="flex-1 p-6 flex items-center justify-center">
             <EmptyState webhookUrl={webhookUrl} />
           </div>
@@ -317,14 +402,28 @@ export default function EndpointDetailPage({
             >
               <RequestList
                 requests={requests}
+                totalCount={totalCount}
+                page={page}
+                totalPages={totalPages}
+                onPageChange={(p) => {
+                  setPage(p);
+                  updateUrlParams({ pageNum: p });
+                }}
                 selectedRequestId={selectedRequestId}
                 onSelectRequest={handleSelectRequest}
                 onClearAll={handleClearAllRequests}
                 onDeleteRequest={handleDeleteSingleRequest}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
+                searchQuery={searchQueryInput}
+                onSearchChange={setSearchQueryInput}
                 methodFilter={methodFilter}
-                onMethodFilterChange={setMethodFilter}
+                onMethodFilterChange={(m) => {
+                  setMethodFilter(m);
+                  setPage(1);
+                  updateUrlParams({ method: m, pageNum: 1 });
+                }}
+                onClearFilters={handleClearFilters}
+                newRequestsAvailableCount={newRequestsAvailableCount}
+                onSyncNewRequests={handleSyncNewRequests}
               />
             </div>
 
@@ -382,7 +481,7 @@ export default function EndpointDetailPage({
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center p-12 text-center text-xs text-muted-foreground">
-                  Select a request from the list to inspect headers, query parameters, and body content.
+                  {requests.length === 0 ? "No requests match your active search filters." : "Select a request from the list to inspect payload details."}
                 </div>
               )}
             </div>

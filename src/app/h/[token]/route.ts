@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookEndpoints, webhookRequests } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { publishNewRequest } from "@/lib/sse";
 
 const MAX_PAYLOAD_SIZE = 1024 * 1024; // 1 MB limit
+const MAX_REQUESTS_PER_ENDPOINT = 100; // Retention limit
 
 async function handleWebhookIngestion(
   req: NextRequest,
@@ -121,10 +122,26 @@ async function handleWebhookIngestion(
     })
     .returning();
 
-  // 7. Publish Realtime SSE Event
+  // 7. Enforce Server-Side Retention Policy (Keep latest 100 requests per endpoint)
+  try {
+    const subquery = db
+      .select({ id: webhookRequests.id })
+      .from(webhookRequests)
+      .where(eq(webhookRequests.endpointId, endpoint.id))
+      .orderBy(desc(webhookRequests.receivedAt))
+      .offset(MAX_REQUESTS_PER_ENDPOINT);
+
+    await db
+      .delete(webhookRequests)
+      .where(sql`${webhookRequests.id} IN (${subquery})`);
+  } catch (err) {
+    console.error("Error running request retention cleanup:", err);
+  }
+
+  // 8. Publish Realtime SSE Event
   publishNewRequest(endpoint.id, newRequest);
 
-  // 8. Return 200 OK Response
+  // 9. Return 200 OK Response
   return NextResponse.json(
     { received: true },
     { status: 200 }

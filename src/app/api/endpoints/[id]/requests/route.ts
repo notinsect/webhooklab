@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { webhookRequests } from "@/db/schema";
-import { eq, desc, and, ilike, or, sql } from "drizzle-orm";
+import { eq, desc, and, ilike, or, sql, count } from "drizzle-orm";
 
 export async function GET(
   req: NextRequest,
@@ -12,6 +12,9 @@ export async function GET(
     const searchParams = req.nextUrl.searchParams;
     const query = searchParams.get("q")?.trim() || "";
     const methodFilter = searchParams.get("method")?.trim().toUpperCase() || "";
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get("limit") || "25", 10)));
+    const offset = (page - 1) * limit;
 
     const conditions = [eq(webhookRequests.endpointId, endpointId)];
 
@@ -27,20 +30,41 @@ export async function GET(
           ilike(webhookRequests.path, searchPattern),
           ilike(webhookRequests.rawBody, searchPattern),
           ilike(webhookRequests.contentType, searchPattern),
-          sql`CAST(${webhookRequests.headers} AS TEXT) ILIKE ${searchPattern}`,
           sql`CAST(${webhookRequests.query} AS TEXT) ILIKE ${searchPattern}`
         )!
       );
     }
 
-    const requests = await db
-      .select()
-      .from(webhookRequests)
-      .where(and(...conditions))
-      .orderBy(desc(webhookRequests.receivedAt))
-      .limit(100);
+    const whereClause = and(...conditions);
 
-    return NextResponse.json({ requests }, { status: 200 });
+    // Get total matching count & paginated requests concurrently
+    const [countResult, requests] = await Promise.all([
+      db
+        .select({ total: count(webhookRequests.id) })
+        .from(webhookRequests)
+        .where(whereClause),
+      db
+        .select()
+        .from(webhookRequests)
+        .where(whereClause)
+        .orderBy(desc(webhookRequests.receivedAt))
+        .limit(limit)
+        .offset(offset),
+    ]);
+
+    const totalCount = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(totalCount / limit);
+
+    return NextResponse.json(
+      {
+        requests,
+        totalCount,
+        page,
+        limit,
+        totalPages,
+      },
+      { status: 200 }
+    );
   } catch (err) {
     console.error("Error fetching requests:", err);
     return NextResponse.json(
@@ -57,11 +81,12 @@ export async function DELETE(
   try {
     const { id: endpointId } = await params;
 
+    // Strictly scoped bulk deletion for the target endpoint only
     await db
       .delete(webhookRequests)
       .where(eq(webhookRequests.endpointId, endpointId));
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    return NextResponse.json({ success: true, endpointId }, { status: 200 });
   } catch (err) {
     console.error("Error clearing requests:", err);
     return NextResponse.json(
