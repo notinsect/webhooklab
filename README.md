@@ -1,54 +1,34 @@
-# WebhookLab
+# WebhookLab (Phase 1)
 
 > Webhook debugging without the guesswork.
 
-WebhookLab is a developer-focused webhook debugging platform that generates temporary HTTP endpoints, captures incoming requests, stores them in PostgreSQL, and pushes them live to a developer interface in real time.
+WebhookLab is a developer-focused webhook debugging platform. In Phase 1, WebhookLab enables developers to create, manage, copy, and delete secure public HTTP webhook endpoints.
 
 ---
 
-## 🏗 Architecture
-
-```mermaid
-flowchart TD
-    Sender["Webhook Sender (Stripe, GitHub, Postman, curl)"] -->|HTTP GET / POST / PUT / PATCH / DELETE| Ingestion["Ingestion Endpoint (/h/[token])"]
-    Ingestion -->|1. Enforce 1MB Body Limit| Parser["Payload Parser"]
-    Parser -->|2. Store Request| DB[(PostgreSQL Database)]
-    Parser -->|3. Publish Event| SSEBus["In-Memory SSE Event Bus"]
-    SSEBus -->|4. Push Event| Client["Browser Inspector UI (/dashboard/endpoints/[id])"]
-    Client -->|5. Auto Reconnect / Sync| DB
-```
-
----
-
-## ✨ Features
-
-- **Public Webhook Ingestion (`/h/[token]`)**: Secure random 96-bit entropy tokens (`/h/<24-hex-token>`). Supports GET, POST, PUT, PATCH, DELETE.
-- **Payload Limits**: 1 MB payload restriction (`1,048,576` bytes).
-- **Safe Parsing**: Gracefully parses `application/json`, `application/x-www-form-urlencoded`, `text/plain`, and malformed JSON payloads.
-- **Realtime Updates**: Server-Sent Events (SSE) push incoming requests instantly to the dashboard without page refreshes. Reconnect and tab-focus synchronization ensures state accuracy.
-- **Header Redaction**: Sensitive headers (`authorization`, `cookie`, `set-cookie`, `x-api-key`, `api-key`, `bearer`) are masked in the UI and clipboard copy actions.
-- **Varnus Integration**: Uses Varnus `JsonInspector` and `RequestResponseViewer` components for HTTP inspection.
-- **SSRF Threat Safeguards**: Explicit validation preventing replay attacks targeting loopback (`127.0.0.0/8`, `::1`), private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local (`169.254.0.0/16`), and cloud metadata endpoints (`169.254.169.254`).
-- **Request Replay**: Re-send captured webhook requests to external destination target URLs.
-- **Request Retention Policy**: Automatically keeps the latest 100 requests per endpoint to avoid unbounded database growth.
-
----
-
-## 🛠 Tech Stack
+## 🛠 Tech Stack (Phase 1)
 
 - **Framework**: Next.js 16 (App Router, Turbopack)
 - **Language**: TypeScript
 - **Database & ORM**: PostgreSQL + Drizzle ORM
-- **Styling & UI**: Tailwind CSS v4, shadcn/ui, Lucide Icons, next-themes (Dark & Light Mode)
-- **Varnus Components**: `json-inspector`, `request-response-viewer`
-- **Runtime & Tooling**: Bun, `bun test`
+- **Styling**: Tailwind CSS v4, shadcn/ui, Lucide Icons, next-themes (Dark & Light Mode)
+- **Runtime**: Bun, `bun test`
+
+---
+
+## ✨ Features (Phase 1)
+
+- **Create Webhook Endpoints**: Generates cryptographically secure 96-bit random tokens (`/h/<24-hex-token>`).
+- **Endpoint Dashboard (`/dashboard`)**: List endpoints, copy public webhook URLs, view creation timestamps, and delete endpoints with confirmation.
+- **Endpoint Detail View (`/dashboard/endpoints/[id]`)**: Displays endpoint metadata and onboarding `curl` instructions.
+- **Public Route Placeholder (`/h/[token]`)**: Validates token existence; returns 404 for unknown/deleted endpoints, and an active status message for valid endpoints.
 
 ---
 
 ## 🚀 Local Setup Guide
 
 ### 1. Prerequisites
-Ensure you have Bun and PostgreSQL installed and running:
+Ensure PostgreSQL is running locally:
 ```bash
 brew services start postgresql@17
 ```
@@ -70,8 +50,8 @@ DATABASE_URL="postgres://127.0.0.1:5432/webhooklab"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
-### 4. Database Setup & Migrations
-Create the PostgreSQL database and push the Drizzle schema:
+### 4. Database Setup & Migration
+Create the database and push the Drizzle schema:
 ```bash
 psql -h 127.0.0.1 -d postgres -c "CREATE DATABASE webhooklab;"
 bunx drizzle-kit push
@@ -85,38 +65,24 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🧪 Testing with `curl`
+## 🧪 Phase 1 Validation & Testing
 
-1. Open WebhookLab at `http://localhost:3000/dashboard` and click **Create Endpoint**.
-2. Copy your generated webhook URL (e.g., `http://localhost:3000/h/d02b442d36a1a88d73136174`).
-3. Send a test webhook:
-
+Run the automated Phase 1 test suite:
 ```bash
-curl -X POST "http://localhost:3000/h/<your-token>?env=dev" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer secret_key_123" \
-  -H "X-Test-Header: webhooklab" \
-  -d '{
-    "event": "payment.completed",
-    "id": "evt_123",
-    "amount": 2499,
-    "currency": "INR"
-  }'
+bun test
 ```
 
-4. Watch the request appear live in the WebhookLab browser dashboard!
+Run linter & build checks:
+```bash
+bun run lint
+bun run build
+```
 
 ---
 
-## 🔒 Security Considerations
+## 🔮 Upcoming in Phase 2
 
-1. **Token Entropy**: Tokens use `crypto.randomBytes(12).toString("hex")` providing 96 bits of cryptographic entropy, preventing brute-force token enumeration.
-2. **Payload Size Capping**: Ingestion endpoints reject payloads exceeding 1 MB (`413 Payload Too Large`), preventing memory exhaustion attacks.
-3. **SSRF Replay Mitigation**: Destination targets are resolved via DNS and checked against RFC1918, loopback, and metadata ranges. HTTP redirects are handled manually to prevent redirect-based SSRF into private subnets.
-4. **Data Redaction**: Sensitive authorization headers are redacted before UI rendering or copying.
-
----
-
-## 📄 License
-
-MIT
+- Webhook request ingestion engine (`/h/[token]` full payload capture)
+- PostgreSQL request persistence
+- Server-Sent Events (SSE) live updates
+- Request inspector & payload viewer

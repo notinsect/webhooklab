@@ -34,14 +34,27 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Untitled Endpoint";
+    let name: string | null = null;
+
+    if (typeof body.name === "string") {
+      const trimmed = body.name.trim();
+      if (trimmed.length > 100) {
+        return NextResponse.json(
+          { error: "Endpoint name cannot exceed 100 characters" },
+          { status: 400 }
+        );
+      }
+      if (trimmed.length > 0) {
+        name = trimmed;
+      }
+    }
 
     const token = generateEndpointToken();
 
     const [newEndpoint] = await db
       .insert(webhookEndpoints)
       .values({
-        name,
+        name: name || "Untitled Endpoint",
         token,
       })
       .returning();
