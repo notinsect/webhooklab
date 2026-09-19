@@ -7,11 +7,12 @@ import { Navbar } from "@/components/navbar";
 import { CopyButton } from "@/components/copy-button";
 import { RequestList } from "@/components/request-list";
 import { EmptyState } from "@/components/empty-state";
+import { ReplayDialog } from "@/components/replay-dialog";
 import { RequestResponseViewer, HttpMessage } from "@/components/ui/request-response-viewer";
 import { useSSE } from "@/hooks/use-sse";
 import { redactHeaders } from "@/lib/redaction";
 import { WebhookEndpoint, WebhookRequest } from "@/db/schema";
-import { ArrowLeft, Trash2, Calendar, RefreshCw, Clock, HardDrive, FileText } from "lucide-react";
+import { ArrowLeft, Trash2, Calendar, RefreshCw, Clock, HardDrive, FileText, Send } from "lucide-react";
 
 export default function EndpointDetailPage({
   params,
@@ -32,6 +33,7 @@ export default function EndpointDetailPage({
   );
   const [loading, setLoading] = useState(true);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
+  const [isReplayOpen, setIsReplayOpen] = useState(false);
 
   // Search & Filter states
   const [searchQueryInput, setSearchQueryInput] = useState(searchParams.get("q") || "");
@@ -471,10 +473,25 @@ export default function EndpointDetailPage({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsReplayOpen(true)}
+                        className="inline-flex h-7 items-center gap-1.5 rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                      >
+                        <Send className="size-3 text-emerald-500" />
+                        <span>Replay</span>
+                      </button>
                       <CopyButton text={selectedRequest.path} label="Copy Path" />
                       <CopyButton text={safeCopyRequestJson} label="Copy Request JSON" />
                     </div>
                   </div>
+
+                  {/* Replay Modal Dialog */}
+                  <ReplayDialog
+                    request={selectedRequest}
+                    isOpen={isReplayOpen}
+                    onClose={() => setIsReplayOpen(false)}
+                  />
 
                   {/* Varnus Component Request / Response Viewer */}
                   <RequestResponseViewer request={httpMessage} />

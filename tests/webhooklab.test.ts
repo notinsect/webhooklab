@@ -3,6 +3,8 @@ import { generateEndpointToken } from "@/lib/token";
 import { redactHeaderValue, redactHeaders } from "@/lib/redaction";
 import { hashPassword, verifyPassword, createSessionToken, verifySessionToken, verifyEndpointOwnership } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/ratelimit";
+import { validateReplayUrl } from "@/lib/ssrf";
+import { sanitizeReplayHeaders } from "@/lib/replay";
 import { db } from "@/db";
 import { users, webhookEndpoints } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -98,6 +100,53 @@ describe("Phase 6: Authentication & Cross-User Security", () => {
     const r61 = await checkRateLimit(testToken, testIp);
     expect(r61.allowed).toBe(false);
     expect(r61.retryAfter).toBeGreaterThan(0);
+  });
+});
+
+describe("Phase 7: Secure Request Replay & SSRF Safeguards", () => {
+  test("rejects loopback, private IP, and cloud metadata destination URLs", async () => {
+    const blockedTargets = [
+      "http://127.0.0.1/webhook",
+      "http://localhost/test",
+      "http://[::1]/api",
+      "http://10.0.0.1/private",
+      "http://172.16.0.1/internal",
+      "http://192.168.1.1/router",
+      "http://169.254.169.254/latest/meta-data/",
+      "file:///etc/passwd",
+      "ftp://example.com/file",
+      "https://admin:secret@example.com/webhook",
+    ];
+
+    for (const target of blockedTargets) {
+      const result = await validateReplayUrl(target);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toBeDefined();
+    }
+  });
+
+  test("strips sensitive credential headers and hop-by-hop headers before replay", () => {
+    const rawHeaders = {
+      "host": "app.example.com",
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "authorization": "Bearer secret_jwt_token_99",
+      "cookie": "session_id=12345",
+      "x-api-key": "ak_live_12345",
+      "x-custom-header": "valid_header_value",
+    };
+
+    const sanitized = sanitizeReplayHeaders(rawHeaders);
+
+    expect(sanitized["content-type"]).toBe("application/json");
+    expect(sanitized["x-custom-header"]).toBe("valid_header_value");
+
+    // Must strip transport & credential headers
+    expect(sanitized["host"]).toBeUndefined();
+    expect(sanitized["connection"]).toBeUndefined();
+    expect(sanitized["authorization"]).toBeUndefined();
+    expect(sanitized["cookie"]).toBeUndefined();
+    expect(sanitized["x-api-key"]).toBeUndefined();
   });
 });
 

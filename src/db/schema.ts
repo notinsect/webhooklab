@@ -66,6 +66,33 @@ export const webhookRequests = pgTable(
   ]
 );
 
+export const webhookReplays = pgTable(
+  "webhook_replays",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => webhookRequests.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    destinationUrl: text("destination_url").notNull(),
+    method: varchar("method", { length: 10 }).notNull(),
+    status: integer("status"),
+    statusText: text("status_text"),
+    durationMs: integer("duration_ms"),
+    responseHeaders: jsonb("response_headers").$type<Record<string, string>>(),
+    responseBody: text("response_body"),
+    responseSize: integer("response_size"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("webhook_replays_request_id_idx").on(table.requestId),
+    index("webhook_replays_user_id_idx").on(table.userId),
+  ]
+);
+
 export const rateLimits = pgTable(
   "rate_limits",
   {
@@ -78,6 +105,7 @@ export const rateLimits = pgTable(
 
 export const usersRelations = relations(users, ({ many }) => ({
   endpoints: many(webhookEndpoints),
+  replays: many(webhookReplays),
 }));
 
 export const webhookEndpointsRelations = relations(webhookEndpoints, ({ one, many }) => ({
@@ -88,10 +116,22 @@ export const webhookEndpointsRelations = relations(webhookEndpoints, ({ one, man
   requests: many(webhookRequests),
 }));
 
-export const webhookRequestsRelations = relations(webhookRequests, ({ one }) => ({
+export const webhookRequestsRelations = relations(webhookRequests, ({ one, many }) => ({
   endpoint: one(webhookEndpoints, {
     fields: [webhookRequests.endpointId],
     references: [webhookEndpoints.id],
+  }),
+  replays: many(webhookReplays),
+}));
+
+export const webhookReplaysRelations = relations(webhookReplays, ({ one }) => ({
+  request: one(webhookRequests, {
+    fields: [webhookReplays.requestId],
+    references: [webhookRequests.id],
+  }),
+  user: one(users, {
+    fields: [webhookReplays.userId],
+    references: [users.id],
   }),
 }));
 
@@ -103,5 +143,8 @@ export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert;
 
 export type WebhookRequest = typeof webhookRequests.$inferSelect;
 export type NewWebhookRequest = typeof webhookRequests.$inferInsert;
+
+export type WebhookReplay = typeof webhookReplays.$inferSelect;
+export type NewWebhookReplay = typeof webhookReplays.$inferInsert;
 
 export type RateLimit = typeof rateLimits.$inferSelect;

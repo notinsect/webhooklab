@@ -1,14 +1,12 @@
 import { lookup } from "dns/promises";
 
 /**
- * SSRF Security Threat Analysis & Safeguards
- * ----------------------------------------
- * Threat: User-provided replay destination URLs could point to local services,
- * internal microservices, private VPC endpoints, or cloud provider metadata endpoints (e.g., 169.254.169.254).
- * Mitigations:
- * 1. Restrict URL protocol to http: or https:.
- * 2. Resolve hostname DNS records and block private IP ranges (RFC1918, Loopback, Link-Local, Cloud Metadata).
- * 3. Disable automatic HTTP redirect following (`redirect: 'manual'`) or inspect each redirect URL.
+ * SSRF Security Safeguards
+ * ------------------------
+ * 1. Protocol validation: Allow http: and https: only.
+ * 2. Credential check: Reject URLs with embedded credentials (user:pass@host).
+ * 3. Domain & IP validation: Block localhost, loopback, private RFC1918 subnets, link-local, cloud metadata.
+ * 4. DNS resolution: Resolve DNS records server-side and verify all IP destinations before sending outbound requests.
  */
 
 export function isPrivateIPv4(ip: string): boolean {
@@ -49,7 +47,7 @@ export function isPrivateIPv4(ip: string): boolean {
 }
 
 export function isPrivateIPv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
+  const normalized = ip.toLowerCase().replace(/^\[|\]$/g, "");
   if (
     normalized === "::1" ||
     normalized === "::" ||
@@ -62,21 +60,35 @@ export function isPrivateIPv6(ip: string): boolean {
   return false;
 }
 
-export async function validateReplayUrl(targetUrl: string): Promise<{ valid: boolean; reason?: string; url?: URL }> {
+export async function validateReplayUrl(
+  targetUrl: string
+): Promise<{ valid: boolean; reason?: string; url?: URL; resolvedIp?: string }> {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(targetUrl);
   } catch {
-    return { valid: false, reason: "Invalid destination URL format" };
+    return { valid: false, reason: "Invalid destination URL format." };
   }
 
+  // 1. Enforce Scheme Rules
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-    return { valid: false, reason: "Only HTTP and HTTPS protocols are allowed" };
+    return {
+      valid: false,
+      reason: "This destination cannot be used for security reasons. Only HTTP and HTTPS protocols are allowed.",
+    };
+  }
+
+  // 2. Reject URL-embedded Credentials
+  if (parsedUrl.username || parsedUrl.password) {
+    return {
+      valid: false,
+      reason: "This destination cannot be used for security reasons. Embedded URL credentials are not allowed.",
+    };
   }
 
   const hostname = parsedUrl.hostname.toLowerCase();
 
-  // Block obvious local names
+  // 3. Block obvious local domains
   if (
     hostname === "localhost" ||
     hostname.endsWith(".local") ||
@@ -84,32 +96,45 @@ export async function validateReplayUrl(targetUrl: string): Promise<{ valid: boo
     hostname.endsWith(".localhost") ||
     hostname.endsWith(".lan")
   ) {
-    return { valid: false, reason: "Destination hostname resolves to a local or internal domain" };
+    return {
+      valid: false,
+      reason: "This destination cannot be used for security reasons.",
+    };
   }
 
-  // If hostname is directly an IPv4 or IPv6 literal
+  // 4. Check if hostname is an IP literal
   if (isPrivateIPv4(hostname) || isPrivateIPv6(hostname)) {
-    return { valid: false, reason: "Destination IP belongs to a private or restricted network" };
+    return {
+      valid: false,
+      reason: "This destination cannot be used for security reasons.",
+    };
   }
 
-  // Resolve DNS records to verify actual IP destination
+  // 5. DNS Resolution & IP Range Validation
   try {
     const addresses = await lookup(hostname, { all: true });
     if (!addresses || addresses.length === 0) {
-      return { valid: false, reason: "Unable to resolve destination host DNS" };
+      return { valid: false, reason: "Unable to resolve destination host DNS." };
     }
 
     for (const addr of addresses) {
       if (addr.family === 4 && isPrivateIPv4(addr.address)) {
-        return { valid: false, reason: `Destination host resolved to restricted IPv4 (${addr.address})` };
+        return {
+          valid: false,
+          reason: "This destination cannot be used for security reasons.",
+        };
       }
       if (addr.family === 6 && isPrivateIPv6(addr.address)) {
-        return { valid: false, reason: `Destination host resolved to restricted IPv6 (${addr.address})` };
+        return {
+          valid: false,
+          reason: "This destination cannot be used for security reasons.",
+        };
       }
     }
-  } catch (err) {
-    return { valid: false, reason: `DNS lookup failed for ${hostname}: ${(err as Error).message}` };
-  }
 
-  return { valid: true, url: parsedUrl };
+    const firstAddress = addresses[0].address;
+    return { valid: true, url: parsedUrl, resolvedIp: firstAddress };
+  } catch {
+    return { valid: false, reason: `DNS lookup failed for destination hostname '${hostname}'.` };
+  }
 }

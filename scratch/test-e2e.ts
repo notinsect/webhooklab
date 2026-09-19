@@ -1,5 +1,5 @@
 import { db } from "../src/db";
-import { users, webhookEndpoints, webhookRequests } from "../src/db/schema";
+import { users, webhookEndpoints } from "../src/db/schema";
 import { eq } from "drizzle-orm";
 
 async function testE2E() {

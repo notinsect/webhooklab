@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 
 async function runMigration() {
   console.log("Applying database schema migration...");
+  await db.execute(sql`DROP TABLE IF EXISTS "webhook_replays" CASCADE;`);
   await db.execute(sql`DROP TABLE IF EXISTS "webhook_requests" CASCADE;`);
   await db.execute(sql`DROP TABLE IF EXISTS "webhook_endpoints" CASCADE;`);
   await db.execute(sql`DROP TABLE IF EXISTS "users" CASCADE;`);
@@ -58,11 +59,37 @@ async function runMigration() {
   `);
 
   await db.execute(sql`
+    CREATE TABLE "webhook_replays" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "request_id" uuid NOT NULL,
+      "user_id" uuid NOT NULL,
+      "destination_url" text NOT NULL,
+      "method" varchar(10) NOT NULL,
+      "status" integer,
+      "status_text" text,
+      "duration_ms" integer,
+      "response_headers" jsonb,
+      "response_body" text,
+      "response_size" integer,
+      "error" text,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+  `);
+
+  await db.execute(sql`
     ALTER TABLE "webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
   `);
 
   await db.execute(sql`
     ALTER TABLE "webhook_requests" ADD CONSTRAINT "webhook_requests_endpoint_id_webhook_endpoints_id_fk" FOREIGN KEY ("endpoint_id") REFERENCES "public"."webhook_endpoints"("id") ON DELETE cascade ON UPDATE no action;
+  `);
+
+  await db.execute(sql`
+    ALTER TABLE "webhook_replays" ADD CONSTRAINT "webhook_replays_request_id_webhook_requests_id_fk" FOREIGN KEY ("request_id") REFERENCES "public"."webhook_requests"("id") ON DELETE cascade ON UPDATE no action;
+  `);
+
+  await db.execute(sql`
+    ALTER TABLE "webhook_replays" ADD CONSTRAINT "webhook_replays_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
   `);
 
   await db.execute(sql`CREATE INDEX "rate_limits_reset_at_idx" ON "rate_limits" USING btree ("reset_at");`);
@@ -72,6 +99,8 @@ async function runMigration() {
   await db.execute(sql`CREATE INDEX "webhook_requests_endpoint_id_idx" ON "webhook_requests" USING btree ("endpoint_id");`);
   await db.execute(sql`CREATE INDEX "webhook_requests_endpoint_received_idx" ON "webhook_requests" USING btree ("endpoint_id","received_at");`);
   await db.execute(sql`CREATE INDEX "webhook_requests_endpoint_method_idx" ON "webhook_requests" USING btree ("endpoint_id","method","received_at");`);
+  await db.execute(sql`CREATE INDEX "webhook_replays_request_id_idx" ON "webhook_replays" USING btree ("request_id");`);
+  await db.execute(sql`CREATE INDEX "webhook_replays_user_id_idx" ON "webhook_replays" USING btree ("user_id");`);
 
   console.log("Migration executed successfully!");
   process.exit(0);

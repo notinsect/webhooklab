@@ -21,11 +21,11 @@ WebhookLab is designed with defense-in-depth security principles for public depl
 ---
 
 ## 🛡️ 3. Cross-User Isolation Guarantees
-- **Server-Side Enforcement**: All endpoint retrieval, request listing, single deletion, history clearing, and SSE streaming handlers explicitly check database ownership:
+- **Server-Side Enforcement**: All endpoint retrieval, request listing, single deletion, history clearing, SSE streaming, and request replay handlers explicitly check database ownership:
   ```ts
   endpoint.userId === session.userId
   ```
-- **Zero Cross-User Access**: User A cannot view, fetch, subscribe to, or modify Endpoint B or its captured requests, even if User A guesses Endpoint B's UUID. Attempted unauthorized access returns HTTP `404 Not Found` to prevent resource enumeration.
+- **Zero Cross-User Access**: User A cannot view, fetch, subscribe to, modify, or replay Endpoint B or its captured requests, even if User A guesses Endpoint B's UUID. Attempted unauthorized access returns HTTP `404 Not Found` to prevent resource enumeration.
 
 ---
 
@@ -34,6 +34,7 @@ WebhookLab is designed with defense-in-depth security principles for public depl
 - **Thresholds**:
   - **Per Endpoint Token**: 60 requests / 60 seconds.
   - **Per Source IP**: 120 requests / 60 seconds.
+  - **Per User Replays**: 10 replays / 60 seconds.
 - **Response**: Returns HTTP `429 Too Many Requests` with `{ "error": "rate_limit_exceeded" }` and a `Retry-After` header. Rejected payloads are dropped immediately and not persisted.
 
 ---
@@ -59,9 +60,14 @@ WebhookLab is designed with defense-in-depth security principles for public depl
 
 ---
 
-## 🚫 8. Outbound Request Replay Status
-> [!IMPORTANT]
-> Outbound Request Replay (`/api/requests/[requestId]/replay`) is intentionally **disabled** in Phase 6. Replay introduces Server-Side Request Forgery (SSRF) risks and will be implemented in a dedicated security phase with strict private subnet filtering (RFC1918, localhost, and cloud metadata 169.254.169.254).
+## 🔁 8. Secure Request Replay & SSRF Safeguards (Phase 7)
+- **Protocol Restrictions**: Allows `http:` and `https:` schemes only. Rejects non-HTTP schemes (`file:`, `ftp:`, `data:`, `gopher:`, `ws:`, `wss:`).
+- **URL Credentials**: Rejects URLs with embedded user credentials (`https://user:password@host`).
+- **SSRF IP Filtering**: Hostnames are resolved via Node DNS `lookup` server-side before request dispatch. Destinations resolving to loopback (`127.0.0.0/8`, `localhost`, `::1`), private RFC1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local / cloud metadata (`169.254.0.0/16`), CGNAT (`100.64.0.0/10`), or multicast are rejected with `"This destination cannot be used for security reasons."`
+- **Redirect Security**: Sets `redirect: 'manual'`. Outbound requests do not follow automatic redirects to prevent redirect-based SSRF.
+- **Sensitive Header Exclusion**: Credential headers (`Authorization`, `Cookie`, `X-API-Key`) and transport headers (`Host`, `Content-Length`, `Connection`) are stripped from outbound replay payloads.
+- **Execution Limits**: 10-second hard timeout via `AbortController`, 1MB response size limit ceiling, custom `User-Agent: WebhookLab-Replay/0.1`.
+- **Audit Persistence**: Every replay execution is saved to `webhook_replays` without modifying the original captured request row.
 
 ---
 
@@ -69,8 +75,11 @@ WebhookLab is designed with defense-in-depth security principles for public depl
 | Metric | Limit | Status Code |
 | :--- | :--- | :--- |
 | Payload Size | 1 MB (1,048,576 bytes) | HTTP 413 |
-| Rate Limit (Token) | 60 req / min | HTTP 429 |
-| Rate Limit (IP) | 120 req / min | HTTP 429 |
+| Rate Limit (Token Ingestion) | 60 req / min | HTTP 429 |
+| Rate Limit (IP Ingestion) | 120 req / min | HTTP 429 |
+| Rate Limit (User Replays) | 10 replays / min | HTTP 429 |
+| Replay Timeout | 10 seconds | HTTP 400 / Error |
+| Replay Response Limit | 1 MB max body | Truncated |
 | Endpoint Retention | 100 requests | Bounded Pruning |
 | Max Headers | 100 headers (8KB max value) | Truncated |
 | Max Query Params | 50 params (2KB max value) | Truncated |
