@@ -51,7 +51,7 @@ export default function LandingPage() {
             </Link>
 
             <a
-              href="https://github.com"
+              href="https://github.com/notinsect/webhooklab"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-11 items-center gap-2 rounded-lg border bg-background px-6 text-sm font-medium text-foreground hover:bg-muted transition-colors"

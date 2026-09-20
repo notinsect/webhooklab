@@ -52,8 +52,9 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 items-center justify-between px-4">
-        <div className="flex items-center gap-6">
+      <div className="container mx-auto flex h-14 items-center justify-between px-4">
+        {/* Left: Brand Logo */}
+        <div className="flex items-center gap-3">
           <Link
             href="/"
             className="flex items-center gap-2 font-mono font-semibold tracking-tight text-foreground transition-opacity hover:opacity-80"
@@ -66,17 +67,19 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
               v0.1
             </span>
           </Link>
-
-          <nav className="hidden items-center gap-4 text-sm font-medium md:flex">
-            <Link
-              href="/dashboard"
-              className="text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Dashboard
-            </Link>
-          </nav>
         </div>
 
+        {/* Center: Navigation Links */}
+        <nav className="flex items-center justify-center gap-6 text-sm font-medium">
+          <Link
+            href="/dashboard"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Dashboard
+          </Link>
+        </nav>
+
+        {/* Right: Actions & Profile */}
         <div className="flex items-center gap-2">
           {onCreateClick && (
             <button
@@ -124,7 +127,7 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
           )}
 
           <a
-            href="https://github.com"
+            href="https://github.com/notinsect/webhooklab"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex size-8 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
