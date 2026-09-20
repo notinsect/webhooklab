@@ -82,7 +82,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background font-sans antialiased">
-      <Navbar onCreateClick={() => setIsCreateOpen(true)} />
+      <Navbar />
 
       <main className="flex-1 container mx-auto px-4 py-8 max-w-5xl space-y-6">
         {/* Page Header */}
@@ -96,14 +96,16 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsCreateOpen(true)}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-foreground px-4 text-xs font-medium text-background transition-opacity hover:opacity-90 self-start sm:self-auto"
-          >
-            <Plus className="size-4" />
-            <span>Create Endpoint</span>
-          </button>
+          {endpoints.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-foreground px-4 text-xs font-medium text-background transition-opacity hover:opacity-90 self-start sm:self-auto cursor-pointer"
+            >
+              <Plus className="size-4" />
+              <span>Create Endpoint</span>
+            </button>
+          )}
         </div>
 
         {/* Content List */}
@@ -125,10 +127,10 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setIsCreateOpen(true)}
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-foreground px-4 text-xs font-medium text-background transition-opacity hover:opacity-90"
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-foreground px-4 text-xs font-medium text-background transition-opacity hover:opacity-90 cursor-pointer"
             >
               <Plus className="size-4" />
-              <span>Create Webhook Endpoint</span>
+              <span>Create Endpoint</span>
             </button>
           </div>
         ) : (

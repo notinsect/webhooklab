@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Terminal, Plus, LogOut, User as UserIcon, LayoutDashboard } from "lucide-react";
+import { Terminal, LogOut, User as UserIcon, LayoutDashboard } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { GetStartedButton } from "./get-started-button";
 
@@ -25,7 +25,7 @@ function GithubIcon({ className }: { className?: string }) {
   );
 }
 
-export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
+export function Navbar() {
   const router = useRouter();
   const [user, setUser] = useState<{ email: string; name?: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,16 +81,6 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
             <span>Dashboard</span>
           </Link>
 
-          {onCreateClick && (
-            <button
-              type="button"
-              onClick={onCreateClick}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90 cursor-pointer"
-            >
-              <Plus className="size-3.5" />
-              <span>New Endpoint</span>
-            </button>
-          )}
 
           {!loading && user && (
             <div className="flex items-center gap-2">
