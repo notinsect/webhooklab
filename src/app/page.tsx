@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
-import { Terminal, Zap, Shield, ArrowRight, Code } from "lucide-react";
+import { Terminal, Zap, Shield, Code } from "lucide-react";
+import { GetStartedButton } from "@/components/get-started-button";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -42,13 +43,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
-            <Link
-              href="/signup"
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-foreground px-6 text-sm font-medium text-background transition-opacity hover:opacity-90"
-            >
-              <span>Get Started</span>
-              <ArrowRight className="size-4" />
-            </Link>
+            <GetStartedButton variant="hero" />
 
             <a
               href="https://github.com/notinsect/webhooklab"
@@ -77,7 +72,7 @@ export default function LandingPage() {
               <span className="text-[10px] text-neutral-500">cURL Example</span>
             </div>
             <pre className="overflow-x-auto text-emerald-400 py-1">
-{`curl -X POST "https://webhooklab.dev/h/8fx21a9c4b7e" \\
+{`curl -X POST "https://webhooklab-one.vercel.app/h/0e5adca34b40006293bbcfbf" \\
   -H "Content-Type: application/json" \\
   -d '{
     "event": "payment.completed",
@@ -100,7 +95,7 @@ export default function LandingPage() {
                 Instantly generate a high-entropy public token URL shape from your workspace.
               </p>
               <div className="font-mono text-[11px] rounded bg-muted/60 p-2 text-foreground truncate border">
-                https://webhooklab.dev/h/8fx21a9c4b7e
+                https://webhooklab-one.vercel.app/h/8fx21a9c4b7e
               </div>
             </div>
 

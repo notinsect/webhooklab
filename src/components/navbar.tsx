@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Terminal, Plus, LogOut, User as UserIcon } from "lucide-react";
+import { Terminal, Plus, LogOut, User as UserIcon, LayoutDashboard } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
+import { GetStartedButton } from "./get-started-button";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -69,18 +70,17 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
           </Link>
         </div>
 
-        {/* Center: Navigation Links */}
-        <nav className="flex items-center justify-center gap-6 text-sm font-medium">
+        {/* Right: Actions, Dashboard Button & Profile */}
+        <div className="flex items-center gap-2.5">
+          {/* Dashboard Button on the Right Side */}
           <Link
             href="/dashboard"
-            className="text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
           >
-            Dashboard
+            <LayoutDashboard className="size-3.5" />
+            <span>Dashboard</span>
           </Link>
-        </nav>
 
-        {/* Right: Actions & Profile */}
-        <div className="flex items-center gap-2">
           {onCreateClick && (
             <button
               type="button"
@@ -117,12 +117,7 @@ export function Navbar({ onCreateClick }: { onCreateClick?: () => void }) {
               >
                 Sign in
               </Link>
-              <Link
-                href="/signup"
-                className="text-xs font-medium bg-foreground text-background px-3 py-1.5 rounded-md hover:opacity-90 transition-opacity"
-              >
-                Get Started
-              </Link>
+              <GetStartedButton variant="navbar" />
             </div>
           )}
 
